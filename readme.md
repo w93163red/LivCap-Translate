@@ -1,14 +1,7 @@
-
-![Frame 1](https://github.com/user-attachments/assets/2146ec4c-28a3-431e-89f8-7cf505e40066)
-
-
 # Livcap
 
-A lightweight live caption and translation app for macOS.
-
-[![App Store](https://img.shields.io/badge/App%20Store-Available%20Now-blue?style=for-the-badge&logo=apple&logoColor=white)](https://apps.apple.com/us/app/livcap/id6748108138?mt=12)  [![macOS Version](https://img.shields.io/badge/macOS-15.0+-red?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macos/) [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-
-[<img width="156" height="40" alt="image" src="https://github.com/user-attachments/assets/60ab5719-729a-4f1f-9523-33c2c5b28b0d" />](https://apps.apple.com/us/app/livcap/id6748108138?mt=12)
+A lightweight live caption and translation app for macOS. 
+This is my personal fork and borrow the idea from [livecaptions-translator](https://github.com/SakiRinn/LiveCaptions-Translator)
 
 
 ## Highlights
@@ -18,16 +11,6 @@ A lightweight live caption and translation app for macOS.
 - **Live Translation** – LLM-powered translation supporting 17 languages via OpenAI-compatible APIs.
 - **Minimalist Design** – Floating overlay with one-click on/off. Less is more.
 - **Open Source** – Free and transparent.
-
-## Demo
-
-https://github.com/user-attachments/assets/2946aa64-c8ba-4af0-9569-295471312eeb
-
-https://github.com/user-attachments/assets/c24fd7d4-b4e5-4843-ab81-db704b5dee30
-
-https://github.com/user-attachments/assets/cbb2e8f6-a85c-4cce-ac33-6c737c29d9da
-
-https://github.com/user-attachments/assets/2c438390-cc63-4c1e-a630-d1eb66276eed
 
 
 ## Features
@@ -131,17 +114,6 @@ xcodebuild test -scheme Livcap
 # Reset permissions for testing
 tccutil reset All com.xxx.xx
 ```
-
-
-## Contributing
-
-We welcome contributions! Please read our [Contributing Guidelines](CONTRIBUTION.md) before submitting PRs.
-
-**Key requirements:**
-- Lightweight performance – maintain efficiency
-- Simple UI design – minimal interface
-- Follow PR template with motivation, code summary, AI assistance docs, and demo (optional)
-
 
 ## License
 
