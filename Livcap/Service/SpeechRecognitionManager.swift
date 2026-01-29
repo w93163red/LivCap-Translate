@@ -15,7 +15,7 @@ import os.log
 
 enum SpeechEvent: Sendable {
     case transcriptionUpdate(String)
-    case sentenceFinalized(String)
+    case sentenceFinalized(captionId: UUID, sentence: String)
     case statusChanged(String)
     case error(Error)
 }
@@ -40,12 +40,15 @@ final class SpeechRecognitionManager: ObservableObject {
     // Text processing state
     private var processedTextLength: Int = 0
     private var fullTranscriptionText: String = ""
-    
+
     // Frame-based silence detection
     private var consecutiveSilenceFrames: Int = 0
     private let silenceFrameThreshold: Int = 10  // ~2 seconds (20 frames × 100ms)
     private var currentSpeechState: Bool = false
-    
+
+    // Sentence boundary detection
+    private let sentenceEnders: Set<Character> = [".", "!", "?", "。", "！", "？"]
+
     // AsyncStream for events
     private var speechEventsContinuation: AsyncStream<SpeechEvent>.Continuation?
     private var speechEventsStream: AsyncStream<SpeechEvent>?
@@ -154,7 +157,7 @@ final class SpeechRecognitionManager: ObservableObject {
         fullTranscriptionText = ""
         currentSpeechState = false
         consecutiveSilenceFrames = 0
-        
+
         // Start session rotation watchdog
         startRotationWatchdog()
         
@@ -178,14 +181,13 @@ final class SpeechRecognitionManager: ObservableObject {
         sessionRotationTask?.cancel()
         sessionRotationTask = nil
         sessionStartTime = nil
-        
         Task { @MainActor in
             self.isRecording = false
-            
+
             // Add final transcription to history if not empty
             if !self.currentTranscription.isEmpty {
-                self.addToHistory(self.currentTranscription)
-                self.speechEventsContinuation?.yield(.sentenceFinalized(self.currentTranscription))
+                let entryId = self.addToHistory(self.currentTranscription)
+                self.speechEventsContinuation?.yield(.sentenceFinalized(captionId: entryId, sentence: self.currentTranscription))
                 self.currentTranscription = ""
             }
         }
@@ -194,7 +196,7 @@ final class SpeechRecognitionManager: ObservableObject {
         processedTextLength = 0
         fullTranscriptionText = ""
         consecutiveSilenceFrames = 0
-        
+
         logger.info("✅ SPEECH RECOGNITION ENGINE STOPPED")
     }
     
@@ -226,10 +228,12 @@ final class SpeechRecognitionManager: ObservableObject {
             if consecutiveSilenceFrames == 1 {
                 onSpeechEnd()
             } else if consecutiveSilenceFrames == silenceFrameThreshold {
-                // 2 seconds of silence - create new line!
-                logger.info("⏰ 2s SILENCE DETECTED - Creating new caption line")
-                Task {
-                    await finalizeSentence()
+                // 2 seconds of silence - finalize current sentence
+                if !currentTranscription.isEmpty {
+                    logger.info("⏰ 2s SILENCE - Creating new caption line")
+                    Task { @MainActor in
+                        self.finalizeSentence()
+                    }
                 }
                 consecutiveSilenceFrames = 0  // Reset counter
             }
@@ -239,11 +243,11 @@ final class SpeechRecognitionManager: ObservableObject {
     func onSpeechStart() {
         currentSpeechState = true
     }
-    
+
     func onSpeechEnd() {
         currentSpeechState = false
     }
-    
+
     // MARK: - Private Methods
     
     @MainActor
@@ -257,18 +261,26 @@ final class SpeechRecognitionManager: ObservableObject {
         // Store the full transcription from SFSpeechRecognizer
         let previousFullLength = fullTranscriptionText.count
         fullTranscriptionText = transcription
-        
+
         // Extract only the NEW part that hasn't been processed yet
         let newPart = extractNewTranscriptionPart(from: transcription)
         currentTranscription = newPart
-        
+
+        // DEBUG: Log every Apple callback to trace punctuation and offset issues
+        logger.info("🔍 [DEBUG] fullText(\(transcription.count))=\"\(transcription)\" | offset=\(self.processedTextLength) | newPart=\"\(newPart)\" | prevLen=\(previousFullLength)")
+
         // Notify via AsyncStream
         speechEventsContinuation?.yield(.transcriptionUpdate(newPart))
-        
+
         // Reset silence counter if new text was added during silence
         if transcription.count > previousFullLength && !currentSpeechState {
             consecutiveSilenceFrames = 0
         }
+
+        // Finalize complete sentences: split at the last stable sentence boundary
+        // A boundary is "stable" when sentence-ending punctuation is followed by more text,
+        // meaning SFSpeechRecognizer has moved past it and won't revise it
+        finalizeCompleteSentences()
     }
     
     // MARK: - Session Management (Concise)
@@ -281,6 +293,8 @@ final class SpeechRecognitionManager: ObservableObject {
         }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        request.taskHint = .dictation
         recognitionRequest = request
         recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self = self else { return }
@@ -330,7 +344,7 @@ final class SpeechRecognitionManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: checkIntervalNs)
                 guard self.isRecording, let start = self.sessionStartTime else { continue }
                 if Date().timeIntervalSince(start) >= self.maxTaskDuration {
-                    self.rotateSession(reason: "max-duration", finalizeCurrent: false)
+                    self.rotateSession(reason: "max-duration", finalizeCurrent: true)
                 }
             }
         }
@@ -346,43 +360,88 @@ final class SpeechRecognitionManager: ObservableObject {
         return ""
     }
     
+    /// Find the last stable sentence boundary in fullTranscriptionText after processedTextLength.
+    /// A stable boundary = sentence-ending punctuation followed by more text (SF has moved past it).
+    /// Finalizes everything up to that boundary, keeps the rest as currentTranscription.
+    @MainActor
+    private func finalizeCompleteSentences() {
+        let fullText = fullTranscriptionText
+        guard fullText.count > processedTextLength else { return }
+
+        // Scan unprocessed portion for the last sentence-ender NOT at the very end
+        let startIdx = fullText.index(fullText.startIndex, offsetBy: processedTextLength)
+        var lastBoundary: String.Index? = nil
+        var idx = startIdx
+
+        while idx < fullText.endIndex {
+            let char = fullText[idx]
+            let nextIdx = fullText.index(after: idx)
+            if sentenceEnders.contains(char) && nextIdx < fullText.endIndex {
+                // Skip consecutive punctuation like "..." or "?!" — not a real boundary
+                let nextChar = fullText[nextIdx]
+                if !sentenceEnders.contains(nextChar) {
+                    lastBoundary = nextIdx
+                }
+            }
+            idx = nextIdx
+        }
+
+        guard let boundary = lastBoundary else { return }
+
+        let completedText = String(fullText[startIdx..<boundary]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let remainingText = String(fullText[boundary...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !completedText.isEmpty else { return }
+
+        logger.info("📝 FINALIZING STABLE SENTENCES: \(completedText)")
+
+        let entryId = addToHistory(completedText)
+        speechEventsContinuation?.yield(.sentenceFinalized(captionId: entryId, sentence: completedText))
+
+        processedTextLength = fullText.distance(from: fullText.startIndex, to: boundary)
+        currentTranscription = remainingText
+    }
+
     @MainActor
     private func finalizeSentence() {
-        if !currentTranscription.isEmpty {
-            logger.info("📝 FINALIZING SENTENCE: \(self.currentTranscription)")
-            
-            // Add the current sentence part to history
-            addToHistory(currentTranscription)
-            
-            // Notify via AsyncStream - this triggers UI to create new line!
-            speechEventsContinuation?.yield(.sentenceFinalized(currentTranscription))
-            
-            // Update processed length to include what we just added
-            processedTextLength = fullTranscriptionText.count
-            
-            // Clear current transcription for next sentence
-            currentTranscription = ""
-            
-            // Rotate session after a silence-based finalization to bound internal state
-            rotateSession(reason: "silence-window", finalizeCurrent: false)
-        }
+        guard !currentTranscription.isEmpty else { return }
+
+        let finalText = currentTranscription
+
+        logger.info("📝 FINALIZING SENTENCE: \(finalText)")
+
+        // Add the current sentence part to history and get the entry ID
+        let entryId = addToHistory(finalText)
+
+        // Notify via AsyncStream with caption ID - this triggers UI to create new line!
+        speechEventsContinuation?.yield(.sentenceFinalized(captionId: entryId, sentence: finalText))
+
+        // Update processed length to include what we just added
+        processedTextLength = fullTranscriptionText.count
+
+        // Clear current transcription for next sentence
+        currentTranscription = ""
+
     }
     
     @MainActor
-    private func addToHistory(_ text: String) {
+    @discardableResult
+    private func addToHistory(_ text: String) -> UUID {
+        let entryId = UUID()
         let entry = CaptionEntry(
-            id: UUID(),
+            id: entryId,
             text: text,
             confidence: 1.0 // SFSpeechRecognizer doesn't provide confidence scores
         )
         captionHistory.append(entry)
-        
+
         // Keep only last 50 entries to prevent memory issues
         if captionHistory.count > 50 {
             captionHistory.removeFirst()
         }
-        
+
         logger.info("📝 Added to history: \(text)")
+        return entryId
     }
     
     // MARK: - Public Utility Methods
@@ -394,6 +453,23 @@ final class SpeechRecognitionManager: ObservableObject {
             self.consecutiveSilenceFrames = 0
             self.logger.info("🗑️ CLEARED ALL CAPTIONS")
         }
+    }
+
+    @MainActor
+    func updateTranslation(for captionId: UUID, translation: String) {
+        if let index = captionHistory.firstIndex(where: { $0.id == captionId }) {
+            captionHistory[index].translation = translation
+            logger.info("🌐 Updated translation for caption \(captionId)")
+        }
+    }
+
+    /// Force finalization of current transcription (for translation timing triggers)
+    /// Called when sync/idle thresholds are reached without natural silence detection
+    @MainActor
+    func forceFinalizeSentence() {
+        guard !currentTranscription.isEmpty else { return }
+        logger.info("📝 FORCE FINALIZING (timing trigger): \(self.currentTranscription)")
+        finalizeSentence()
     }
 }
 

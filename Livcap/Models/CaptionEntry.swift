@@ -13,11 +13,13 @@ struct CaptionEntry: Identifiable, Sendable {
     let id: UUID
     let text: String
     let confidence: Float? // Optional confidence score
-    
-    init(id: UUID = UUID(), text: String, confidence: Float? = nil) {
+    var translation: String? // Optional translation
+
+    init(id: UUID = UUID(), text: String, confidence: Float? = nil, translation: String? = nil) {
         self.id = id
         self.text = text
         self.confidence = confidence
+        self.translation = translation
     }
 }
 

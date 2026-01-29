@@ -45,6 +45,10 @@ struct LivcapApp: App {
         .windowResizability(.contentSize)
         .defaultSize(width: 300, height: 400)
 
+        // Settings window
+        Settings {
+            SettingsView()
+        }
     }
     
     private func getGoldenRatioWidth() -> CGFloat {

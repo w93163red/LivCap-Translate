@@ -2,155 +2,93 @@
 //  CaptionContentView.swift
 //  Livcap
 //
-//  Extracted shared caption content from CaptionView
-//  Handles all caption display, scrolling, and animation logic
+//  Paragraph-style caption display (mac-transcriber style)
+//  Shows recent 4 sentences merged into one paragraph
 //
 
 import SwiftUI
 
 struct CaptionContentView<ViewModel: CaptionViewModelProtocol>: View {
     @ObservedObject var captionViewModel: ViewModel
+    @ObservedObject private var settings = TranslationSettings.shared
     @Binding var hasShownFirstContentAnimation: Bool
     @Binding var firstContentAnimationOffset: CGFloat
     @Binding var firstContentAnimationOpacity: Double
-    
-    // Scrollbar state
-    @State private var contentHeight: CGFloat = 0
-    @State private var visibleHeight: CGFloat = 0
-    @State private var scrollOffset: CGFloat = 0
-    @State private var isScrolling: Bool = false
-    
-    private let opacityLevel: Double = 0.7
-    
+
+    // Computed: recent sentences (last N from settings)
+    private var recentHistory: [CaptionEntry] {
+        let history = captionViewModel.captionHistory
+        let maxVisible = settings.maxVisibleSentences
+        if history.count > maxVisible {
+            return Array(history.suffix(maxVisible))
+        }
+        return history
+    }
+
+    // Computed: combined original text paragraph
+    private var originalParagraph: String {
+        var texts = recentHistory.map { $0.text }
+        if !captionViewModel.currentTranscription.isEmpty {
+            texts.append(captionViewModel.currentTranscription + "...")
+        }
+        return texts.joined(separator: " ")
+    }
+
+    // Computed: combined translation paragraph
+    private var translationParagraph: String {
+        var translations = recentHistory.compactMap { $0.translation }.filter { !$0.isEmpty }
+        if !captionViewModel.currentTranslation.isEmpty {
+            translations.append(captionViewModel.currentTranslation)
+        }
+        return translations.joined(separator: " ")
+    }
+
+    private var hasContent: Bool {
+        !originalParagraph.isEmpty
+    }
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ZStack(alignment: .trailing) {
-                ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    // Caption history (older sentences at top)
-                    ForEach(captionViewModel.captionHistory.indices, id: \.self) { index in
-                        let entry = captionViewModel.captionHistory[index]
-                        let isFirstContent = index == 0 && captionViewModel.currentTranscription.isEmpty
-                        
-                        Text(entry.text)
-                            .font(.system(size: 22, weight: .medium, design: .rounded))
-                            .foregroundColor(.primary)
-                            .lineSpacing(7)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.clear)
-                                    .opacity(opacityLevel)
-                            )
-                            .offset(y: isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOffset : 0)
-                            .opacity(isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOpacity : 1.0)
-                    }
-                    
-                    // Current transcription (real-time at bottom)
-                    if !captionViewModel.currentTranscription.isEmpty {
-                        let isFirstContent = captionViewModel.captionHistory.isEmpty
-                        
-                        Text(captionViewModel.currentTranscription+"...")
-                            .font(.system(size: 22, weight: .medium, design: .rounded))
-                            .foregroundColor(.primary)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 1)
-                            .lineSpacing(7)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id("currentTranscription")
-                            .offset(y: isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOffset : 0)
-                            .opacity(isFirstContent && !hasShownFirstContentAnimation ? firstContentAnimationOpacity : 1.0)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-                .background(
-                    GeometryReader { geo -> Color in
-                        DispatchQueue.main.async {
-                            self.contentHeight = geo.size.height
-                            self.scrollOffset = geo.frame(in: .named("scroll")).minY
-                        }
-                        return Color.clear
-                    }
-                )
-            }
-            .coordinateSpace(name: "scroll")
-            .background(
-                GeometryReader { geo -> Color in
-                    DispatchQueue.main.async {
-                        self.visibleHeight = geo.size.height
-                    }
-                    return Color.clear
-                }
-            )
-            
-            // Custom Scrollbar
-            if contentHeight > visibleHeight {
-                let thumbHeight = max(20, visibleHeight * (visibleHeight / contentHeight))
-                let scrollRatio = visibleHeight / contentHeight
-                let thumbOffset = -scrollOffset * scrollRatio
-                
-                Capsule()
-                    .fill(Color.primary.opacity(0.6))
-                    .frame(width: 4, height: thumbHeight)
-                    .offset(y: max(0, min(visibleHeight - thumbHeight, thumbOffset)))
-                    .padding(.trailing, 4)
-                    .opacity(isScrolling ? 1 : 0) // Hide when not scrolling if desired, or keep visible
-                    .animation(.easeInOut(duration: 0.2), value: isScrolling)
-                    // Align to top-trailing
-                    .frame(maxHeight: .infinity, alignment: .top)
-            }
-            
-            }
-            .onChange(of: scrollOffset) { _ in
-                // Show scrollbar when scrolling
-                isScrolling = true
-                
-                // Auto hide after delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    isScrolling = false
+        VStack(alignment: .leading, spacing: 16) {
+            if hasContent {
+                // Original text paragraph
+                Text(originalParagraph)
+                    .font(.system(size: 22, weight: .medium, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineSpacing(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Translation paragraph (if available)
+                if !translationParagraph.isEmpty {
+                    Text(translationParagraph)
+                        .font(.system(size: 18, weight: .regular, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .lineSpacing(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .onChange(of: captionViewModel.currentTranscription) {
-                // Trigger first content animation for currentTranscription
-                if !captionViewModel.currentTranscription.isEmpty && !hasShownFirstContentAnimation && captionViewModel.captionHistory.isEmpty {
-                    triggerFirstContentAnimation()
-                }
-                
-                if !captionViewModel.currentTranscription.isEmpty {
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo("currentTranscription", anchor: .bottom)
-                    }
-                }
-            }
-            .onChange(of: captionViewModel.captionHistory.count) {
-                // Trigger first content animation for first caption history entry
-                if !captionViewModel.captionHistory.isEmpty && !hasShownFirstContentAnimation {
-                    triggerFirstContentAnimation()
-                }
-                
-                // Auto-scroll when new caption is added
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    if let lastEntry = captionViewModel.captionHistory.last {
-                        withAnimation(.easeOut(duration: 0.3)) {
-                            proxy.scrollTo(lastEntry.id, anchor: .bottom)
-                        }
-                    }
-                }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .offset(y: !hasShownFirstContentAnimation && hasContent ? firstContentAnimationOffset : 0)
+        .opacity(!hasShownFirstContentAnimation && hasContent ? firstContentAnimationOpacity : 1.0)
+        .onChange(of: hasContent) {
+            if hasContent && !hasShownFirstContentAnimation {
+                triggerFirstContentAnimation()
             }
         }
     }
-    
+
     private func triggerFirstContentAnimation() {
         guard !hasShownFirstContentAnimation else { return }
-        
+
         withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0.1)) {
             firstContentAnimationOffset = 0
             firstContentAnimationOpacity = 1.0
         }
-        
+
         hasShownFirstContentAnimation = true
     }
 }
@@ -159,14 +97,15 @@ struct CaptionContentView<ViewModel: CaptionViewModelProtocol>: View {
 
 class MockCaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     @Published var captionHistory: [CaptionEntry] = [
-        CaptionEntry(text: "Welcome to Livcap, the real-time live captioning application for macOS.", confidence: 0.95),
-        CaptionEntry(text: "This app captures audio from your microphone and system audio sources.", confidence: 0.92),
-        CaptionEntry(text: "Speech recognition is powered by Apple's advanced Speech framework.", confidence: 0.88)
+        CaptionEntry(text: "Welcome to Livcap, the real-time live captioning application for macOS.", confidence: 0.95, translation: "欢迎使用 Livcap，macOS 上的实时字幕应用程序。"),
+        CaptionEntry(text: "This app captures audio from your microphone and system audio sources.", confidence: 0.92, translation: "此应用程序从您的麦克风和系统音频源捕获音频。"),
+        CaptionEntry(text: "Speech recognition is powered by Apple's advanced Speech framework.", confidence: 0.88, translation: "语音识别由 Apple 先进的语音框架提供支持。"),
+        CaptionEntry(text: "Translation is done using AI models with context awareness.", confidence: 0.90, translation: "翻译使用具有上下文感知能力的 AI 模型完成。")
     ]
-    
-    @Published var currentTranscription: String = "This is a sample of real-time transcription text as it appears during live captioning"
-}
 
+    @Published var currentTranscription: String = "This is a sample of real-time transcription"
+    @Published var currentTranslation: String = "这是实时转录的示例"
+}
 
 
 #Preview("Light Mode") {
@@ -176,7 +115,7 @@ class MockCaptionViewModel: ObservableObject, CaptionViewModelProtocol {
         firstContentAnimationOffset: .constant(0),
         firstContentAnimationOpacity: .constant(1.0)
     )
-    .frame(width: 600, height: 200)
+    .frame(width: 600, height: 300)
     .background(Color.gray.opacity(0.1))
     .preferredColorScheme(.light)
 }
@@ -188,24 +127,7 @@ class MockCaptionViewModel: ObservableObject, CaptionViewModelProtocol {
         firstContentAnimationOffset: .constant(0),
         firstContentAnimationOpacity: .constant(1.0)
     )
-    .frame(width: 600, height: 400)
+    .frame(width: 600, height: 300)
     .background(Color.gray.opacity(0.1))
     .preferredColorScheme(.dark)
 }
-
-// MARK: - Scroll Helper
-
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGPoint = .zero
-    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) {
-        value = nextValue()
-    }
-}
-
-struct ContentSizePreferenceKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-

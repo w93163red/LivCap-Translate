@@ -9,8 +9,9 @@ import AppKit
 
 
 struct CaptionView: View {
-    
+
     @StateObject private var captionViewModel: CaptionViewModel
+    @ObservedObject private var translationSettings = TranslationSettings.shared
     @State private var isPinned = false
     @State private var isHovering = false
     @State private var showWindowControls = false
@@ -163,7 +164,14 @@ struct CaptionView: View {
                 isActive: captionViewModel.isSystemAudioEnabled,
                 action: { captionViewModel.toggleSystemAudio() }
             )
-            
+
+            CircularControlButton(
+                image: .system(translationSettings.isTranslationEnabled ? "globe" : "globe.badge.chevron.backward"),
+                helpText: "Toggle Translation",
+                isActive: translationSettings.isTranslationEnabled,
+                action: { translationSettings.isTranslationEnabled.toggle() }
+            )
+
             CircularControlButton(
                 image: .system(isPinned ? "pin.fill" : "pin"),
                 helpText: "Pin Window",

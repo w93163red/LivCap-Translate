@@ -17,6 +17,7 @@ import os.log
 protocol CaptionViewModelProtocol: ObservableObject {
     var captionHistory: [CaptionEntry] { get }
     var currentTranscription: String { get }
+    var currentTranslation: String { get }  // Realtime translation for current transcription
 }
 
 /// CaptionViewModel for real-time speech recognition using SFSpeechRecognizer
@@ -34,6 +35,7 @@ final class CaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     // Forwarded from SpeechProcessor
     var captionHistory: [CaptionEntry] { speechProcessor.captionHistory }
     var currentTranscription: String { speechProcessor.currentTranscription }
+    var currentTranslation: String { speechProcessor.currentTranslation }
     
     // MARK: - Private Properties
     private let audioCoordinator: AudioCoordinator

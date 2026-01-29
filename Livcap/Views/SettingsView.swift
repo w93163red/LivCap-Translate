@@ -1,0 +1,138 @@
+//
+//  SettingsView.swift
+//  Livcap
+//
+
+import SwiftUI
+
+struct SettingsView: View {
+    @ObservedObject private var settings = TranslationSettings.shared
+    @State private var showAPIKey = false
+    @State private var testingConnection = false
+    @State private var connectionTestResult: String?
+
+    var body: some View {
+        Form {
+            // Translation Toggle Section
+            Section {
+                Toggle("Enable Translation", isOn: $settings.isTranslationEnabled)
+                    .toggleStyle(.switch)
+            } header: {
+                Label("Translation", systemImage: "globe")
+            } footer: {
+                Text("Translate finalized captions using an OpenAI-compatible API")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            // API Configuration Section
+            Section {
+                TextField("API Endpoint", text: $settings.apiEndpoint)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!settings.isTranslationEnabled)
+
+                HStack {
+                    if showAPIKey {
+                        TextField("API Key", text: $settings.apiKey)
+                            .textFieldStyle(.roundedBorder)
+                    } else {
+                        SecureField("API Key", text: $settings.apiKey)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    Button(action: { showAPIKey.toggle() }) {
+                        Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .disabled(!settings.isTranslationEnabled)
+
+                TextField("Model", text: $settings.model)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!settings.isTranslationEnabled)
+
+            } header: {
+                Label("API Configuration", systemImage: "server.rack")
+            } footer: {
+                Text("Supports OpenAI-compatible APIs. Enter any model name (e.g., gpt-4o, claude-3-5-sonnet, deepseek-chat)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            // Language Selection Section
+            Section {
+                Picker("Target Language", selection: $settings.targetLanguage) {
+                    ForEach(TranslationSettings.availableLanguages, id: \.self) { language in
+                        Text(language).tag(language)
+                    }
+                }
+                .disabled(!settings.isTranslationEnabled)
+            } header: {
+                Label("Language", systemImage: "character.bubble")
+            }
+
+            // Caption Display Settings
+            Section {
+                Stepper("Visible Sentences: \(settings.maxVisibleSentences)", value: $settings.maxVisibleSentences, in: 1...10)
+
+                Stepper("Context Size: \(settings.maxContextSize)", value: $settings.maxContextSize, in: 1...30)
+                    .disabled(!settings.isTranslationEnabled)
+            } header: {
+                Label("Display & Context", systemImage: "text.alignleft")
+            } footer: {
+                Text("Visible sentences: number of recent sentences shown on screen. Context size: number of translated pairs sent to the LLM for better accuracy.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            // Test Connection Section
+            Section {
+                Button(action: testConnection) {
+                    HStack {
+                        if testingConnection {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        }
+                        Text(testingConnection ? "Testing..." : "Test Connection")
+                    }
+                }
+                .disabled(!settings.isTranslationEnabled || !settings.isConfigured || testingConnection)
+
+                if let result = connectionTestResult {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundColor(result.contains("Success") ? .green : .red)
+                }
+            } header: {
+                Label("Connection Test", systemImage: "network")
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 450, height: 620)
+    }
+
+    private func testConnection() {
+        testingConnection = true
+        connectionTestResult = nil
+
+        Task {
+            do {
+                let result = try await TranslationService.shared.testTranslation("Hello")
+                await MainActor.run {
+                    connectionTestResult = "Success! Response: \(result.prefix(50))..."
+                    testingConnection = false
+                }
+            } catch {
+                await MainActor.run {
+                    connectionTestResult = "Failed: \(error.localizedDescription)"
+                    testingConnection = false
+                }
+            }
+        }
+    }
+}
+
+#Preview {
+    SettingsView()
+}
