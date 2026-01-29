@@ -10,26 +10,20 @@ import AppKit
 
 struct CaptionView: View {
 
-    @StateObject private var captionViewModel: CaptionViewModel
+    @EnvironmentObject var captionViewModel: CaptionViewModel
     @ObservedObject private var translationSettings = TranslationSettings.shared
     @State private var isPinned = false
     @State private var isHovering = false
     @State private var showWindowControls = false
-    
+
     // Animation state for first content appearance
     @State private var hasShownFirstContentAnimation = false
     @State private var firstContentAnimationOffset: CGFloat = 30
     @State private var firstContentAnimationOpacity: Double = 0
-    
+
     private let opacityLevel: Double = 0.7
-    
+
     private let engineExamples=CoreAudioTapEngineExamples()
-    
-
-
-    init() {
-        _captionViewModel = StateObject(wrappedValue: CaptionViewModel())
-    }
     
     var body: some View {
         GeometryReader { geometry in
@@ -189,11 +183,13 @@ struct CaptionView: View {
 
 #Preview("Light Mode") {
     CaptionView()
+        .environmentObject(CaptionViewModel())
         .preferredColorScheme(.light)
 }
 
 #Preview("Dark Mode") {
     CaptionView()
+        .environmentObject(CaptionViewModel())
         .preferredColorScheme(.dark)
 }
 

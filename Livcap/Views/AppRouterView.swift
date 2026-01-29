@@ -10,13 +10,14 @@ import AVFoundation
 
 struct AppRouterView: View {
     @StateObject private var permissionManager = PermissionManager.shared
+    @Environment(\.openWindow) private var openWindow
     @State private var hasInitialized = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Warning banner for denied permissions (appears at top if needed)
             PermissionWarningBanner(permissionManager: permissionManager)
-            
+
             // Always show CaptionView (no more permission blocking)
             CaptionView()
                 .onAppear {
@@ -38,15 +39,20 @@ struct AppRouterView: View {
     private func initializeApp() {
         guard !hasInitialized else { return }
         hasInitialized = true
-        
+
         debugLog("AppRouter Initializing - new simple flow")
-        
+
         // Check for denied permissions (for warning banner)
         permissionManager.checkDeniedPermissionsOnLoad()
-        
+
         // Configure window appearance
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             configureWindowAppearance()
+        }
+
+        // Open the main history window on launch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            openWindow(id: "main")
         }
     }
     

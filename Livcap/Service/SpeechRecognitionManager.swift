@@ -431,12 +431,13 @@ final class SpeechRecognitionManager: ObservableObject {
         let entry = CaptionEntry(
             id: entryId,
             text: text,
-            confidence: 1.0 // SFSpeechRecognizer doesn't provide confidence scores
+            confidence: 1.0, // SFSpeechRecognizer doesn't provide confidence scores
+            timestamp: Date()
         )
         captionHistory.append(entry)
 
-        // Keep only last 50 entries to prevent memory issues
-        if captionHistory.count > 50 {
+        // Keep only last 500 entries to support main window history
+        if captionHistory.count > 500 {
             captionHistory.removeFirst()
         }
 

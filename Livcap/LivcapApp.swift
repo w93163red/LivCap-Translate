@@ -12,8 +12,9 @@ import AVFoundation
 @main
 struct LivcapApp: App {
 
+    @StateObject private var captionViewModel = CaptionViewModel()
     @State private var showAboutWindow = false
-    
+
     init() {
         print("App is launching... initing")
     }
@@ -21,6 +22,7 @@ struct LivcapApp: App {
     var body: some Scene {
         WindowGroup {
             AppRouterView()
+                .environmentObject(captionViewModel)
         }
         .windowResizability(.contentSize)
         .defaultSize(width: getGoldenRatioWidth(), height: 100)
@@ -31,13 +33,20 @@ struct LivcapApp: App {
             // Remove default menu items for cleaner experience
             CommandGroup(replacing: .newItem) { }
             CommandGroup(replacing: .systemServices) { }
-            
+
             // Custom About menu item
             CommandGroup(replacing: .appInfo) {
                 AboutMenuButton()
             }
         }
-        
+
+        // Main history window
+        Window("Livcap - History", id: "main") {
+            MainWindowView()
+                .environmentObject(captionViewModel)
+        }
+        .defaultSize(width: 700, height: 500)
+
         // About window
         Window("About Livcap", id: "about") {
             AboutView()
