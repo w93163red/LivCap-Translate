@@ -302,11 +302,24 @@ final class SpeechRecognitionManager: ObservableObject {
                 if let error = error {
                     await self.updateStatus("Recognition error: \(error.localizedDescription)")
                     self.speechEventsContinuation?.yield(.error(error))
+                    // Auto-recover: rotate session to restart recognition
+                    if self.isRecording {
+                        self.logger.info("♻️ Auto-recovering from recognition error")
+                        self.rotateSession(reason: "error-recovery", finalizeCurrent: true)
+                    }
                     return
                 }
                 if let result = result {
                     let transcription = result.bestTranscription.formattedString
                     await self.processTranscriptionResult(transcription)
+
+                    // SFSpeechRecognizer sets isFinal when it stops accepting input
+                    // (typically after ~1 minute of continuous speech).
+                    // Auto-rotate to continue seamless recognition.
+                    if result.isFinal {
+                        self.logger.info("♻️ Recognition result is final, rotating session")
+                        self.rotateSession(reason: "result-final", finalizeCurrent: true)
+                    }
                 }
             }
         }
