@@ -36,6 +36,7 @@ final class CaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     var captionHistory: [CaptionEntry] { speechProcessor.captionHistory }
     var currentTranscription: String { speechProcessor.currentTranscription }
     var currentTranslation: String { speechProcessor.currentTranslation }
+    var captionStore: CaptionStore { speechProcessor.captionStore }
     
     // MARK: - Private Properties
     private let audioCoordinator: AudioCoordinator
@@ -183,5 +184,9 @@ final class CaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     func clearCaptions() {
         speechProcessor.clearCaptions()
         logger.info("🗑️ CLEARED ALL CAPTIONS")
+    }
+
+    func clearOverlay() {
+        speechProcessor.clearOverlay()
     }
 }

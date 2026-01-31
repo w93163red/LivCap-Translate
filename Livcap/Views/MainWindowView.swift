@@ -12,8 +12,19 @@ struct MainWindowView: View {
     @ObservedObject private var settings = TranslationSettings.shared
     @State private var autoScrollEnabled = true
     @State private var showSettings = false
+    @State private var searchText = ""
+    @State private var searchResults: [CaptionEntry]?
+    @State private var searchTask: Task<Void, Never>?
+    @State private var persistedEntries: [CaptionEntry] = []
 
-    private var historyEntries: [CaptionEntry] { captionViewModel.captionHistory }
+    /// Merge persisted history with live session entries (deduped by id)
+    private var historyEntries: [CaptionEntry] {
+        let liveIds = Set(captionViewModel.captionHistory.map(\.id))
+        let historical = persistedEntries.filter { !liveIds.contains($0.id) }
+        return historical + captionViewModel.captionHistory
+    }
+    private var displayedEntries: [CaptionEntry] { searchResults ?? historyEntries }
+    private var isSearching: Bool { !searchText.isEmpty }
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -48,29 +59,67 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 500, minHeight: 300)
+        .onAppear {
+            persistedEntries = captionViewModel.captionStore.fetchAll()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            guard let window = notification.object as? NSWindow,
+                  window.title == "Livcap - History" else { return }
+            NSApplication.shared.terminate(nil)
+        }
     }
 
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack {
-            Button(action: { captionViewModel.clearCaptions() }) {
-                Label("Clear History", systemImage: "trash")
+        VStack(spacing: 6) {
+            HStack {
+                Button(action: {
+                    captionViewModel.clearCaptions()
+                    persistedEntries = []
+                }) {
+                    Label("Clear History", systemImage: "trash")
+                }
+
+                Button(action: toggleOverlayWindow) {
+                    Label("Toggle Overlay", systemImage: "rectangle.on.rectangle")
+                }
+
+                Spacer()
+
+                Toggle("Auto-scroll", isOn: $autoScrollEnabled)
+                    .toggleStyle(.checkbox)
+                    .disabled(isSearching)
+
+                Button(action: { withAnimation { showSettings.toggle() } }) {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .help("Toggle Settings Panel")
             }
 
-            Button(action: toggleOverlayWindow) {
-                Label("Toggle Overlay", systemImage: "rectangle.on.rectangle")
+            // Search bar
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search captions...", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                        searchResults = nil
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-
-            Spacer()
-
-            Toggle("Auto-scroll", isOn: $autoScrollEnabled)
-                .toggleStyle(.checkbox)
-
-            Button(action: { withAnimation { showSettings.toggle() } }) {
-                Label("Settings", systemImage: "gearshape")
+            .padding(6)
+            .background(Color.primary.opacity(0.05))
+            .cornerRadius(6)
+            .onChange(of: searchText) {
+                performSearch()
             }
-            .help("Toggle Settings Panel")
         }
     }
 
@@ -79,7 +128,14 @@ struct MainWindowView: View {
     private var historyList: some View {
         ScrollViewReader { proxy in
             List {
-                ForEach(historyEntries) { entry in
+                if isSearching && displayedEntries.isEmpty {
+                    Text("No results for \"\(searchText)\"")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding()
+                }
+
+                ForEach(displayedEntries) { entry in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .top, spacing: 8) {
                             Text("[\(Self.timeFormatter.string(from: entry.timestamp))]")
@@ -87,14 +143,14 @@ struct MainWindowView: View {
                                 .foregroundColor(.secondary)
 
                             Text(entry.text)
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.system(size: CGFloat(settings.historyOriginalFontSize), weight: .medium))
                                 .foregroundColor(.primary)
                                 .textSelection(.enabled)
                         }
 
                         if let translation = entry.translation, !translation.isEmpty {
                             Text(translation)
-                                .font(.system(size: 13))
+                                .font(.system(size: CGFloat(settings.historyTranslationFontSize)))
                                 .foregroundColor(.secondary)
                                 .padding(.leading, 76)
                                 .textSelection(.enabled)
@@ -104,8 +160,8 @@ struct MainWindowView: View {
                     .id(entry.id)
                 }
 
-                // Current in-progress transcription
-                if !captionViewModel.currentTranscription.isEmpty {
+                // Current in-progress transcription (only in live mode, not search)
+                if !isSearching && !captionViewModel.currentTranscription.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .top, spacing: 8) {
                             Text("[\(Self.timeFormatter.string(from: Date()))]")
@@ -113,13 +169,13 @@ struct MainWindowView: View {
                                 .foregroundColor(.secondary)
 
                             Text(captionViewModel.currentTranscription + "...")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.system(size: CGFloat(settings.historyOriginalFontSize), weight: .medium))
                                 .foregroundColor(.primary.opacity(0.7))
                         }
 
                         if !captionViewModel.currentTranslation.isEmpty {
                             Text(captionViewModel.currentTranslation)
-                                .font(.system(size: 13))
+                                .font(.system(size: CGFloat(settings.historyTranslationFontSize)))
                                 .foregroundColor(.secondary.opacity(0.7))
                                 .padding(.leading, 76)
                         }
@@ -130,14 +186,14 @@ struct MainWindowView: View {
             }
             .listStyle(.plain)
             .onChange(of: historyEntries.count) {
-                if autoScrollEnabled, let lastId = historyEntries.last?.id {
+                if autoScrollEnabled && !isSearching, let lastId = historyEntries.last?.id {
                     withAnimation {
                         proxy.scrollTo(lastId, anchor: .bottom)
                     }
                 }
             }
             .onChange(of: captionViewModel.currentTranscription) {
-                if autoScrollEnabled && !captionViewModel.currentTranscription.isEmpty {
+                if autoScrollEnabled && !isSearching && !captionViewModel.currentTranscription.isEmpty {
                     withAnimation {
                         proxy.scrollTo("current-transcription", anchor: .bottom)
                     }
@@ -156,9 +212,16 @@ struct MainWindowView: View {
 
             Spacer()
 
-            Text("Total: \(historyEntries.count) sentences")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+            if isSearching {
+                Text("\(displayedEntries.count) results")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            } else {
+                let totalStored = captionViewModel.captionStore.count()
+                Text("Total: \(totalStored) sentences")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
@@ -218,24 +281,62 @@ struct MainWindowView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            // Overlay Font Size
+            Section {
+                Stepper("Original: \(Int(settings.overlayOriginalFontSize))pt",
+                        value: $settings.overlayOriginalFontSize, in: 14...36, step: 1)
+
+                Stepper("Translation: \(Int(settings.overlayTranslationFontSize))pt",
+                        value: $settings.overlayTranslationFontSize, in: 12...32, step: 1)
+            } header: {
+                Label("Overlay Font Size", systemImage: "textformat.size")
+            }
+
+            // History Font Size
+            Section {
+                Stepper("Original: \(Int(settings.historyOriginalFontSize))pt",
+                        value: $settings.historyOriginalFontSize, in: 10...24, step: 1)
+
+                Stepper("Translation: \(Int(settings.historyTranslationFontSize))pt",
+                        value: $settings.historyTranslationFontSize, in: 10...24, step: 1)
+            } header: {
+                Label("History Font Size", systemImage: "textformat.size")
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
     }
 
+    // MARK: - Search
+
+    private func performSearch() {
+        searchTask?.cancel()
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty {
+            searchResults = nil
+            return
+        }
+        // Debounce: 300ms delay
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            let results = captionViewModel.captionStore.search(query: query)
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                searchResults = results
+            }
+        }
+    }
+
     // MARK: - Overlay Toggle
 
     private func toggleOverlayWindow() {
-        for window in NSApplication.shared.windows {
-            // The overlay is the WindowGroup (borderless style)
-            if window.styleMask.contains(.borderless) && window.title != "Livcap - History" {
-                if window.isVisible {
-                    window.orderOut(nil)
-                } else {
-                    window.makeKeyAndOrderFront(nil)
-                }
-                return
-            }
+        guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+        if panel.isVisible {
+            panel.orderOut(nil)
+        } else {
+            panel.orderFront(nil)
         }
     }
 }

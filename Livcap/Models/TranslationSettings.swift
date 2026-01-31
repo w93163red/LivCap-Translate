@@ -22,6 +22,10 @@ final class TranslationSettings: ObservableObject {
         static let maxSyncInterval = "translation_max_sync_interval"
         static let maxVisibleSentences = "caption_max_visible_sentences"
         static let maxContextSize = "translation_max_context_size"
+        static let historyOriginalFontSize = "history_original_font_size"
+        static let historyTranslationFontSize = "history_translation_font_size"
+        static let overlayOriginalFontSize = "overlay_original_font_size"
+        static let overlayTranslationFontSize = "overlay_translation_font_size"
     }
 
     // MARK: - Published Properties with AppStorage
@@ -42,6 +46,12 @@ final class TranslationSettings: ObservableObject {
     @AppStorage(Keys.maxVisibleSentences) var maxVisibleSentences: Int = 4
     // Number of recent translation pairs to include as LLM context
     @AppStorage(Keys.maxContextSize) var maxContextSize: Int = 10
+    // History window font sizes
+    @AppStorage(Keys.historyOriginalFontSize) var historyOriginalFontSize: Double = 14
+    @AppStorage(Keys.historyTranslationFontSize) var historyTranslationFontSize: Double = 13
+    // Overlay font sizes
+    @AppStorage(Keys.overlayOriginalFontSize) var overlayOriginalFontSize: Double = 22
+    @AppStorage(Keys.overlayTranslationFontSize) var overlayTranslationFontSize: Double = 18
 
     // MARK: - Predefined Languages
     static let availableLanguages: [String] = [

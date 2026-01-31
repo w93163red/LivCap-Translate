@@ -9,6 +9,7 @@ import Foundation
 import Speech
 import AVFoundation
 import Combine
+import NaturalLanguage
 import os.log
 
 // MARK: - Speech Events
@@ -37,22 +38,33 @@ final class SpeechRecognitionManager: ObservableObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     
-    // Text processing state
-    private var processedTextLength: Int = 0
-    private var fullTranscriptionText: String = ""
+    // Segment-based text processing state
+    private var processedSegmentCount: Int = 0
 
     // Frame-based silence detection
     private var consecutiveSilenceFrames: Int = 0
     private let silenceFrameThreshold: Int = 10  // ~2 seconds (20 frames × 100ms)
     private var currentSpeechState: Bool = false
 
-    // Sentence boundary detection
-    private let sentenceEnders: Set<Character> = [".", "!", "?", "。", "！", "？"]
+    // NLP-based sentence boundary detection
+    private let sentenceTokenizer = NLTokenizer(unit: .sentence)
+
+    // Post-filter: abbreviations that NLTokenizer misidentifies as sentence boundaries
+    private let abbreviationSuffixes: Set<String> = [
+        "Mr.", "Mrs.", "Ms.", "Dr.", "Jr.", "Sr.", "Prof.",
+        "St.", "Ave.", "Blvd.", "Rd.", "Ln.",
+        "Inc.", "Corp.", "Ltd.", "Co.",
+        "vs.", "etc.", "approx.", "dept.",
+        "Jan.", "Feb.", "Mar.", "Apr.", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec.",
+    ]
 
     // AsyncStream for events
     private var speechEventsContinuation: AsyncStream<SpeechEvent>.Continuation?
     private var speechEventsStream: AsyncStream<SpeechEvent>?
     
+    // Persistence
+    let captionStore = CaptionStore()
+
     // Logging
     private var isLoggerOn: Bool = false // change to true for debugging
     private let logger = Logger(subsystem: "com.livcap.speech", category: "SpeechRecognitionManager")
@@ -143,7 +155,7 @@ final class SpeechRecognitionManager: ObservableObject {
         recognitionTask = nil
         
         // Create initial recognition session
-        try await MainActor.run {
+        await MainActor.run {
             self.startNewSession()
         }
         
@@ -153,8 +165,7 @@ final class SpeechRecognitionManager: ObservableObject {
         }
         
         // Reset state
-        processedTextLength = 0
-        fullTranscriptionText = ""
+        processedSegmentCount = 0
         currentSpeechState = false
         consecutiveSilenceFrames = 0
 
@@ -193,8 +204,7 @@ final class SpeechRecognitionManager: ObservableObject {
         }
         
         // Reset state
-        processedTextLength = 0
-        fullTranscriptionText = ""
+        processedSegmentCount = 0
         consecutiveSilenceFrames = 0
 
         logger.info("✅ SPEECH RECOGNITION ENGINE STOPPED")
@@ -257,30 +267,34 @@ final class SpeechRecognitionManager: ObservableObject {
     }
     
     @MainActor
-    private func processTranscriptionResult(_ transcription: String) {
-        // Store the full transcription from SFSpeechRecognizer
-        let previousFullLength = fullTranscriptionText.count
-        fullTranscriptionText = transcription
+    private func processTranscriptionResult(_ result: SFSpeechRecognitionResult) {
+        let transcription = result.bestTranscription
+        let segments = transcription.segments
+        let formattedString = transcription.formattedString
 
-        // Extract only the NEW part that hasn't been processed yet
-        let newPart = extractNewTranscriptionPart(from: transcription)
-        currentTranscription = newPart
+        // Guard: if Apple reduced segment count below our marker (merged words), adjust
+        if processedSegmentCount > segments.count {
+            processedSegmentCount = segments.count
+        }
 
-        // DEBUG: Log every Apple callback to trace punctuation and offset issues
-        logger.info("🔍 [DEBUG] fullText(\(transcription.count))=\"\(transcription)\" | offset=\(self.processedTextLength) | newPart=\"\(newPart)\" | prevLen=\(previousFullLength)")
+        // Build currentTranscription from unprocessed segments
+        let previousTranscription = currentTranscription
+        currentTranscription = textFromSegments(formattedString, segments: segments,
+                                                from: processedSegmentCount, to: segments.count)
+
+        // Debug log
+        logger.info("🔍 [DEBUG] segments=\(segments.count) processed=\(self.processedSegmentCount) current=\"\(self.currentTranscription)\"")
 
         // Notify via AsyncStream
-        speechEventsContinuation?.yield(.transcriptionUpdate(newPart))
+        speechEventsContinuation?.yield(.transcriptionUpdate(currentTranscription))
 
-        // Reset silence counter if new text was added during silence
-        if transcription.count > previousFullLength && !currentSpeechState {
+        // Reset silence counter if text changed during silence
+        if currentTranscription != previousTranscription && !currentSpeechState {
             consecutiveSilenceFrames = 0
         }
 
-        // Finalize complete sentences: split at the last stable sentence boundary
-        // A boundary is "stable" when sentence-ending punctuation is followed by more text,
-        // meaning SFSpeechRecognizer has moved past it and won't revise it
-        finalizeCompleteSentences()
+        // Finalize stable sentences using segment boundaries
+        finalizeStableSentences(formattedString: formattedString, segments: segments)
     }
     
     // MARK: - Session Management (Concise)
@@ -300,7 +314,7 @@ final class SpeechRecognitionManager: ObservableObject {
             guard let self = self else { return }
             Task {
                 if let error = error {
-                    await self.updateStatus("Recognition error: \(error.localizedDescription)")
+                    self.updateStatus("Recognition error: \(error.localizedDescription)")
                     self.speechEventsContinuation?.yield(.error(error))
                     // Auto-recover: rotate session to restart recognition
                     if self.isRecording {
@@ -310,8 +324,7 @@ final class SpeechRecognitionManager: ObservableObject {
                     return
                 }
                 if let result = result {
-                    let transcription = result.bestTranscription.formattedString
-                    await self.processTranscriptionResult(transcription)
+                    self.processTranscriptionResult(result)
 
                     // SFSpeechRecognizer sets isFinal when it stops accepting input
                     // (typically after ~1 minute of continuous speech).
@@ -342,8 +355,7 @@ final class SpeechRecognitionManager: ObservableObject {
             self.logger.info("♻️ Rotate session (reason=\(reason))")
             if finalizeCurrent { self.finalizeSentence() }
             self.stopCurrentSession()
-            self.processedTextLength = 0
-            self.fullTranscriptionText = ""
+            self.processedSegmentCount = 0
             self.currentTranscription = ""
             self.startNewSession()
         }
@@ -363,56 +375,111 @@ final class SpeechRecognitionManager: ObservableObject {
         }
     }
 
-    private func extractNewTranscriptionPart(from fullText: String) -> String {
-        // Extract only the part that hasn't been processed yet
-        if fullText.count > processedTextLength {
-            let startIndex = fullText.index(fullText.startIndex, offsetBy: processedTextLength)
-            let newPart = String(fullText[startIndex...])
-            return newPart.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return ""
+    /// Extract text from a range of segments using their substringRange in formattedString.
+    private func textFromSegments(_ formattedString: String, segments: [SFTranscriptionSegment],
+                                  from startIdx: Int, to endIdx: Int) -> String {
+        guard startIdx < endIdx, startIdx < segments.count, endIdx <= segments.count else { return "" }
+        let nsString = formattedString as NSString
+        let startRange = segments[startIdx].substringRange
+        let endRange = segments[endIdx - 1].substringRange
+        let location = startRange.location
+        let length = (endRange.location + endRange.length) - location
+        let combinedRange = NSRange(location: location, length: length)
+        return nsString.substring(with: combinedRange).trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    
-    /// Find the last stable sentence boundary in fullTranscriptionText after processedTextLength.
-    /// A stable boundary = sentence-ending punctuation followed by more text (SF has moved past it).
-    /// Finalizes everything up to that boundary, keeps the rest as currentTranscription.
-    @MainActor
-    private func finalizeCompleteSentences() {
-        let fullText = fullTranscriptionText
-        guard fullText.count > processedTextLength else { return }
 
-        // Scan unprocessed portion for the last sentence-ender NOT at the very end
-        let startIdx = fullText.index(fullText.startIndex, offsetBy: processedTextLength)
-        var lastBoundary: String.Index? = nil
-        var idx = startIdx
-
-        while idx < fullText.endIndex {
-            let char = fullText[idx]
-            let nextIdx = fullText.index(after: idx)
-            if sentenceEnders.contains(char) && nextIdx < fullText.endIndex {
-                // Skip consecutive punctuation like "..." or "?!" — not a real boundary
-                let nextChar = fullText[nextIdx]
-                if !sentenceEnders.contains(nextChar) {
-                    lastBoundary = nextIdx
-                }
+    /// Check if text ends with an abbreviation (NLTokenizer false positive filter).
+    /// Handles both known abbreviations ("St.", "Dr.") and single uppercase letter + period ("N.", "E.").
+    private func endsWithAbbreviation(_ text: String) -> Bool {
+        // Check single uppercase letter + period (e.g., "N.", "S.", "E.", "W.")
+        if text.count >= 2 {
+            let lastTwo = String(text.suffix(2))
+            if lastTwo.count == 2 && lastTwo.last == "." && lastTwo.first?.isUppercase == true {
+                return true
             }
-            idx = nextIdx
+        }
+        // Check known multi-character abbreviations
+        let lowered = text.lowercased()
+        for abbr in abbreviationSuffixes {
+            if lowered.hasSuffix(abbr.lowercased()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Use NLTokenizer to find sentence boundaries in formattedString, then finalize
+    /// complete sentences that fall within the "stable zone" (before the last segment).
+    @MainActor
+    private func finalizeStableSentences(formattedString: String, segments: [SFTranscriptionSegment]) {
+        // Need at least 2 unprocessed segments (last one is unstable — Apple may still revise it)
+        guard segments.count > processedSegmentCount + 1 else { return }
+
+        // Run NLTokenizer on full formattedString
+        sentenceTokenizer.string = formattedString
+
+        // Collect sentence end offsets (UTF-16 positions in formattedString)
+        var sentenceEndOffsets: [Int] = []
+        sentenceTokenizer.enumerateTokens(in: formattedString.startIndex..<formattedString.endIndex) { range, _ in
+            let nsRange = NSRange(range, in: formattedString)
+            sentenceEndOffsets.append(nsRange.location + nsRange.length)
+            return true
         }
 
-        guard let boundary = lastBoundary else { return }
+        // Define the stable zone in formattedString coordinates
+        let unprocessedStart = segments[processedSegmentCount].substringRange.location
+        let lastStableSegment = segments[segments.count - 2]
+        let stableEnd = lastStableSegment.substringRange.location + lastStableSegment.substringRange.length
 
-        let completedText = String(fullText[startIdx..<boundary]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let remainingText = String(fullText[boundary...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Find the last sentence boundary within our stable zone,
+        // filtering out boundaries that end with abbreviations (NLTokenizer false positives)
+        let nsString = formattedString as NSString
+        var lastValidBoundary: Int? = nil
+        for endOffset in sentenceEndOffsets {
+            if endOffset > unprocessedStart && endOffset <= stableEnd {
+                // Check if this boundary ends with an abbreviation
+                let sentenceText = nsString.substring(
+                    with: NSRange(location: unprocessedStart, length: endOffset - unprocessedStart)
+                ).trimmingCharacters(in: .whitespaces)
+                if endsWithAbbreviation(sentenceText) {
+                    continue  // Skip false boundary
+                }
+                lastValidBoundary = endOffset
+            }
+        }
 
-        guard !completedText.isEmpty else { return }
+        guard let boundary = lastValidBoundary else { return }
+
+        // Map boundary offset back to a segment index
+        var boundarySegmentIdx = processedSegmentCount
+        for i in processedSegmentCount..<segments.count {
+            let segEnd = segments[i].substringRange.location + segments[i].substringRange.length
+            if segEnd <= boundary {
+                boundarySegmentIdx = i
+            } else {
+                break
+            }
+        }
+
+        // Safety: boundary segment must be before the last segment
+        guard boundarySegmentIdx >= processedSegmentCount && boundarySegmentIdx < segments.count - 1 else { return }
+
+        let completedText = textFromSegments(formattedString, segments: segments,
+                                             from: processedSegmentCount, to: boundarySegmentIdx + 1)
+
+        // Sanity check: skip if text has no real content (Apple revision artifact)
+        guard completedText.contains(where: { $0.isLetter || $0.isNumber }) else { return }
 
         logger.info("📝 FINALIZING STABLE SENTENCES: \(completedText)")
 
         let entryId = addToHistory(completedText)
         speechEventsContinuation?.yield(.sentenceFinalized(captionId: entryId, sentence: completedText))
 
-        processedTextLength = fullText.distance(from: fullText.startIndex, to: boundary)
-        currentTranscription = remainingText
+        processedSegmentCount = boundarySegmentIdx + 1
+
+        // Update currentTranscription to remaining segments
+        currentTranscription = textFromSegments(formattedString, segments: segments,
+                                                from: processedSegmentCount, to: segments.count)
     }
 
     @MainActor
@@ -423,18 +490,13 @@ final class SpeechRecognitionManager: ObservableObject {
 
         logger.info("📝 FINALIZING SENTENCE: \(finalText)")
 
-        // Add the current sentence part to history and get the entry ID
         let entryId = addToHistory(finalText)
-
-        // Notify via AsyncStream with caption ID - this triggers UI to create new line!
         speechEventsContinuation?.yield(.sentenceFinalized(captionId: entryId, sentence: finalText))
 
-        // Update processed length to include what we just added
-        processedTextLength = fullTranscriptionText.count
-
-        // Clear current transcription for next sentence
+        // Mark all current segments as processed.
+        // Set to Int.max; processTranscriptionResult will clamp on next callback.
+        processedSegmentCount = Int.max
         currentTranscription = ""
-
     }
     
     @MainActor
@@ -449,10 +511,13 @@ final class SpeechRecognitionManager: ObservableObject {
         )
         captionHistory.append(entry)
 
-        // Keep only last 500 entries to support main window history
+        // Keep only last 500 entries in memory for overlay display
         if captionHistory.count > 500 {
             captionHistory.removeFirst()
         }
+
+        // Persist to SQLite (unlimited storage)
+        captionStore.insert(entry)
 
         logger.info("📝 Added to history: \(text)")
         return entryId
@@ -465,7 +530,18 @@ final class SpeechRecognitionManager: ObservableObject {
             self.captionHistory.removeAll()
             self.currentTranscription = ""
             self.consecutiveSilenceFrames = 0
+            self.captionStore.deleteAll()
             self.logger.info("🗑️ CLEARED ALL CAPTIONS")
+        }
+    }
+
+    /// Clear in-memory overlay state only (does not delete persisted data)
+    func clearOverlay() {
+        Task { @MainActor in
+            self.captionHistory.removeAll()
+            self.currentTranscription = ""
+            self.consecutiveSilenceFrames = 0
+            self.logger.info("🗑️ CLEARED OVERLAY")
         }
     }
 
@@ -474,6 +550,18 @@ final class SpeechRecognitionManager: ObservableObject {
         if let index = captionHistory.firstIndex(where: { $0.id == captionId }) {
             captionHistory[index].translation = translation
             logger.info("🌐 Updated translation for caption \(captionId)")
+        }
+        // Persist translation to SQLite
+        captionStore.updateTranslation(id: captionId, translation: translation)
+    }
+
+    private func loadPersistedHistory() {
+        let entries = captionStore.fetchAll(limit: 500)
+        Task { @MainActor in
+            self.captionHistory = entries
+            if !entries.isEmpty {
+                self.logger.info("📂 Loaded \(entries.count) entries from database")
+            }
         }
     }
 

@@ -78,10 +78,11 @@ extension AudioObjectID {
         let err = AudioObjectGetPropertyDataSize(self, &address, 0, nil, &dataSize)
         guard err == noErr, dataSize > 0 else { return nil }
         
-        var cfString: CFString = "" as CFString
-        let err2 = AudioObjectGetPropertyData(self, &address, 0, nil, &dataSize, &cfString)
+        let stringBuffer = UnsafeMutableRawPointer.allocate(byteCount: Int(dataSize), alignment: MemoryLayout<UnsafeRawPointer>.alignment)
+        defer { stringBuffer.deallocate() }
+        let err2 = AudioObjectGetPropertyData(self, &address, 0, nil, &dataSize, stringBuffer)
         guard err2 == noErr else { return nil }
-        
+        let cfString = Unmanaged<CFString>.fromOpaque(stringBuffer.load(as: UnsafeRawPointer.self)).takeUnretainedValue()
         let result = cfString as String
         return result.isEmpty ? nil : result
     }
@@ -183,17 +184,14 @@ extension AudioDeviceID {
     func getDeviceName() -> String {
         var address = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyElementName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var dataSize: UInt32 = 0
-        var name: CFString = "" as CFString
-        
         let err1 = AudioObjectGetPropertyDataSize(self, &address, 0, nil, &dataSize)
-        if err1 == noErr {
-            let err2 = AudioObjectGetPropertyData(self, &address, 0, nil, &dataSize, &name)
-            if err2 == noErr {
-                return name as String
-            }
-        }
-        
-        return "Unknown Device"
+        guard err1 == noErr, dataSize > 0 else { return "Unknown Device" }
+        let stringBuffer = UnsafeMutableRawPointer.allocate(byteCount: Int(dataSize), alignment: MemoryLayout<UnsafeRawPointer>.alignment)
+        defer { stringBuffer.deallocate() }
+        let err2 = AudioObjectGetPropertyData(self, &address, 0, nil, &dataSize, stringBuffer)
+        guard err2 == noErr else { return "Unknown Device" }
+        let name = Unmanaged<CFString>.fromOpaque(stringBuffer.load(as: UnsafeRawPointer.self)).takeUnretainedValue()
+        return name as String
     }
 }
 

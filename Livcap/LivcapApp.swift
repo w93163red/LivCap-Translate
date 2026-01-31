@@ -6,29 +6,32 @@
 //
 
 import SwiftUI
-import SwiftData
 import AVFoundation
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var overlayPanel: FloatingPanel?
+}
 
 @main
 struct LivcapApp: App {
 
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var captionViewModel = CaptionViewModel()
-    @State private var showAboutWindow = false
 
     init() {
         print("App is launching... initing")
     }
 
     var body: some Scene {
-        WindowGroup {
-            AppRouterView()
+        // Main history window (primary scene — auto-opens on launch)
+        Window("Livcap - History", id: "main") {
+            MainWindowView()
                 .environmentObject(captionViewModel)
+                .onAppear {
+                    setupOverlayPanelIfNeeded()
+                }
         }
-        .windowResizability(.contentSize)
-        .defaultSize(width: getGoldenRatioWidth(), height: 100)
-        .defaultPosition(.bottom)
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        .defaultSize(width: 700, height: 500)
         .commands {
             // Remove default menu items for cleaner experience
             CommandGroup(replacing: .newItem) { }
@@ -39,13 +42,6 @@ struct LivcapApp: App {
                 AboutMenuButton()
             }
         }
-
-        // Main history window
-        Window("Livcap - History", id: "main") {
-            MainWindowView()
-                .environmentObject(captionViewModel)
-        }
-        .defaultSize(width: 700, height: 500)
 
         // About window
         Window("About Livcap", id: "about") {
@@ -59,20 +55,21 @@ struct LivcapApp: App {
             SettingsView()
         }
     }
-    
-    private func getGoldenRatioWidth() -> CGFloat {
-        // Get screen width and calculate golden ratio (0.618)
-        if let screen = NSScreen.main {
-            return screen.frame.width * 0.618
-        }
-        return 800 // fallback
+
+    private func setupOverlayPanelIfNeeded() {
+        guard appDelegate.overlayPanel == nil else { return }
+        let content = AppRouterView()
+            .environmentObject(captionViewModel)
+        let panel = FloatingPanel(contentView: content)
+        panel.positionAtBottom()
+        panel.orderFront(nil)
+        appDelegate.overlayPanel = panel
     }
-    
 }
 
 struct AboutMenuButton: View {
     @Environment(\.openWindow) private var openWindow
-    
+
     var body: some View {
         Button("About Livcap") {
             openWindow(id: "about")

@@ -129,16 +129,14 @@ struct CaptionView: View {
     // MARK: - Window Management Functions
     
     private func toggleWindowPinning() {
-        guard let window = NSApplication.shared.windows.first else { return }
-        
+        guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+
         if isPinned {
-            // Pin window: Set to floating level to keep it on top
-            window.level = .floating
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.level = .floating
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         } else {
-            // Unpin window: Set to normal level
-            window.level = .normal
-            window.collectionBehavior = [.canJoinAllSpaces]
+            panel.level = .normal
+            panel.collectionBehavior = [.canJoinAllSpaces]
         }
     }
     
@@ -164,6 +162,13 @@ struct CaptionView: View {
                 helpText: "Toggle Translation",
                 isActive: translationSettings.isTranslationEnabled,
                 action: { translationSettings.isTranslationEnabled.toggle() }
+            )
+
+            CircularControlButton(
+                image: .system("trash"),
+                helpText: "Clear Overlay",
+                isActive: false,
+                action: { captionViewModel.clearOverlay() }
             )
 
             CircularControlButton(

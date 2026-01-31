@@ -48,30 +48,47 @@ struct CaptionContentView<ViewModel: CaptionViewModelProtocol>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if hasContent {
-                // Original text paragraph
-                Text(originalParagraph)
-                    .font(.system(size: 22, weight: .medium, design: .rounded))
-                    .foregroundColor(.primary)
-                    .lineSpacing(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if hasContent {
+                        // Original text paragraph
+                        Text(originalParagraph)
+                            .font(.system(size: CGFloat(settings.overlayOriginalFontSize), weight: .medium, design: .rounded))
+                            .foregroundColor(.primary)
+                            .lineSpacing(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Translation paragraph (if available)
-                if !translationParagraph.isEmpty {
-                    Text(translationParagraph)
-                        .font(.system(size: 18, weight: .regular, design: .rounded))
-                        .foregroundColor(.secondary)
-                        .lineSpacing(6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // Translation paragraph (if available)
+                        if !translationParagraph.isEmpty {
+                            Text(translationParagraph)
+                                .font(.system(size: CGFloat(settings.overlayTranslationFontSize), weight: .regular, design: .rounded))
+                                .foregroundColor(.secondary)
+                                .lineSpacing(6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        // Anchor for auto-scroll
+                        Color.clear
+                            .frame(height: 1)
+                            .id("caption-bottom")
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: originalParagraph) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("caption-bottom", anchor: .bottom)
                 }
             }
-
-            Spacer(minLength: 0)
+            .onChange(of: translationParagraph) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("caption-bottom", anchor: .bottom)
+                }
+            }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .offset(y: !hasShownFirstContentAnimation && hasContent ? firstContentAnimationOffset : 0)
         .opacity(!hasShownFirstContentAnimation && hasContent ? firstContentAnimationOpacity : 1.0)
         .onChange(of: hasContent) {

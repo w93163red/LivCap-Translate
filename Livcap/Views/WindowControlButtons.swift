@@ -69,7 +69,8 @@ struct WindowControlButtons: View {
     // MARK: - Window Actions
     
     private func closeWindow() {
-        NSApplication.shared.terminate(nil)
+        guard let window = NSApplication.shared.windows.first(where: { $0.styleMask.contains(.borderless) }) else { return }
+        window.orderOut(nil)
     }
     
     private func minimizeWindow() {

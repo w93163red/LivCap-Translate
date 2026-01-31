@@ -11,6 +11,7 @@ final class SpeechProcessor: ObservableObject {
     // Forwarded from SpeechRecognitionManager
     var captionHistory: [CaptionEntry] { speechRecognitionManager.captionHistory }
     var currentTranscription: String { speechRecognitionManager.currentTranscription }
+    var captionStore: CaptionStore { speechRecognitionManager.captionStore }
 
     // MARK: - Private Properties
     private let speechRecognitionManager = SpeechRecognitionManager()
@@ -129,5 +130,10 @@ final class SpeechProcessor: ObservableObject {
     func clearCaptions() {
         speechRecognitionManager.clearCaptions()
         logger.info("🗑️ CLEARED ALL CAPTIONS")
+    }
+
+    func clearOverlay() {
+        speechRecognitionManager.clearOverlay()
+        currentTranslation = ""
     }
 }
