@@ -69,32 +69,30 @@ struct WindowControlButtons: View {
     // MARK: - Window Actions
     
     private func closeWindow() {
-        guard let window = NSApplication.shared.windows.first(where: { $0.styleMask.contains(.borderless) }) else { return }
-        window.orderOut(nil)
+        guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+        panel.orderOut(nil)
     }
-    
+
     private func minimizeWindow() {
-        guard let window = NSApplication.shared.windows.first else { return }
-        window.miniaturize(nil)
+        guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+        panel.miniaturize(nil)
     }
-    
+
     private func toggleMaximize() {
-        guard let window = NSApplication.shared.windows.first else { return }
-        
+        guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }) else { return }
+
         if isWindowMaximized() {
-            // Restore to previous size
-            restoreWindow(window)
+            restoreWindow(panel)
         } else {
-            // Maximize window
-            maximizeWindow(window)
+            maximizeWindow(panel)
         }
     }
-    
+
     private func isWindowMaximized() -> Bool {
-        guard let window = NSApplication.shared.windows.first,
-              let screen = window.screen else { return false }
+        guard let panel = NSApp.windows.first(where: { $0 is FloatingPanel }),
+              let screen = panel.screen else { return false }
         
-        let windowFrame = window.frame
+        let windowFrame = panel.frame
         let screenFrame = screen.visibleFrame
         
         // Check if window frame is approximately equal to screen frame

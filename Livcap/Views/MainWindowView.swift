@@ -336,6 +336,15 @@ struct MainWindowView: View {
         if panel.isVisible {
             panel.orderOut(nil)
         } else {
+            // Position below the history window, centered horizontally
+            if let historyWindow = NSApp.windows.first(where: { $0.title == "Livcap - History" }) {
+                let hFrame = historyWindow.frame
+                let panelWidth = max(panel.frame.width, hFrame.width * 0.8)
+                let panelHeight = max(panel.frame.height, 80)
+                let x = hFrame.midX - panelWidth / 2
+                let y = hFrame.minY - panelHeight - 10
+                panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
+            }
             panel.orderFront(nil)
         }
     }

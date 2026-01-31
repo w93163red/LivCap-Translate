@@ -17,7 +17,7 @@ final class FloatingPanel: NSPanel {
     init<Content: View>(contentView: Content) {
         super.init(
             contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel, .resizable, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -26,7 +26,9 @@ final class FloatingPanel: NSPanel {
         level = .normal
         collectionBehavior = [.canJoinAllSpaces]
         isOpaque = false
-        backgroundColor = .clear
+        // Use nearly-transparent background so the entire window area captures mouse events
+        // (fully clear background causes clicks in transparent areas to pass through)
+        backgroundColor = NSColor(white: 0, alpha: 0.005)
         hasShadow = false
         isMovableByWindowBackground = true
         titlebarAppearsTransparent = true
@@ -36,19 +38,21 @@ final class FloatingPanel: NSPanel {
 
         let hostingView = NSHostingView(rootView: contentView)
         self.contentView = hostingView
+    }
 
-        if let cv = self.contentView {
-            cv.wantsLayer = true
-            cv.layer?.cornerRadius = 26
-            cv.layer?.masksToBounds = true
+    /// Ensure the panel becomes key on mouse interaction so resize drag works.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            makeKey()
         }
+        super.sendEvent(event)
     }
 
     /// Position the panel at the bottom center of the focused screen.
     func positionAtBottom() {
         let screen = getFocusedScreen()
-        let width: CGFloat = 400
-        let height: CGFloat = 45
+        let width = screen.frame.width * 0.618
+        let height: CGFloat = 80
         let x = screen.frame.minX + (screen.frame.width - width) / 2
         let y = calculateYPositionAboveDock(screen: screen, windowHeight: height)
         setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
