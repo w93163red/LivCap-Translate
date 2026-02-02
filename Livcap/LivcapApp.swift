@@ -10,6 +10,14 @@ import AVFoundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var overlayPanel: FloatingPanel?
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Show overlay when dock icon is clicked
+        if let panel = overlayPanel, !panel.isVisible {
+            panel.orderFront(nil)
+        }
+        return true
+    }
 }
 
 @main
@@ -61,7 +69,10 @@ struct LivcapApp: App {
         let content = AppRouterView()
             .environmentObject(captionViewModel)
         let panel = FloatingPanel(contentView: content)
-        panel.positionAtBottom()
+        // Only use default position on first launch (no saved frame)
+        if panel.frame.width < 1 {
+            panel.positionDefault()
+        }
         panel.orderFront(nil)
         appDelegate.overlayPanel = panel
     }

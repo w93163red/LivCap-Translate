@@ -10,8 +10,10 @@ import SwiftUI
 struct MainWindowView: View {
     @EnvironmentObject var captionViewModel: CaptionViewModel
     @ObservedObject private var settings = TranslationSettings.shared
+    @ObservedObject private var debugLogStore = DebugLogStore.shared
     @State private var autoScrollEnabled = true
     @State private var showSettings = false
+    @State private var showDebugLogs = false
     @State private var searchText = ""
     @State private var searchResults: [CaptionEntry]?
     @State private var searchTask: Task<Void, Never>?
@@ -42,13 +44,23 @@ struct MainWindowView: View {
 
                 Divider()
 
-                historyList
+                if showDebugLogs {
+                    debugLogList
+                } else {
+                    historyList
+                }
 
                 Divider()
 
-                statusBar
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+                if showDebugLogs {
+                    debugStatusBar
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                } else {
+                    statusBar
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                }
             }
             .frame(minWidth: 400)
 
@@ -90,6 +102,13 @@ struct MainWindowView: View {
                 Toggle("Auto-scroll", isOn: $autoScrollEnabled)
                     .toggleStyle(.checkbox)
                     .disabled(isSearching)
+
+                if DebugLogStore.isEnabled {
+                    Button(action: { withAnimation { showDebugLogs.toggle() } }) {
+                        Label("Logs", systemImage: "ladybug")
+                    }
+                    .help("Toggle Debug Logs")
+                }
 
                 Button(action: { withAnimation { showSettings.toggle() } }) {
                     Label("Settings", systemImage: "gearshape")
@@ -222,6 +241,82 @@ struct MainWindowView: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
+        }
+    }
+
+    // MARK: - Debug Log List
+
+    private static let logTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private var debugLogList: some View {
+        ScrollViewReader { proxy in
+            List {
+                if debugLogStore.entries.isEmpty {
+                    Text("No logs yet. Start recording to see debug output.")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding()
+                }
+
+                ForEach(debugLogStore.entries) { entry in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("[\(Self.logTimeFormatter.string(from: entry.timestamp))]")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+
+                        Text(entry.level.label)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(logLevelColor(entry.level))
+
+                        Text(entry.message)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(logLevelColor(entry.level))
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 2)
+                    .id(entry.id)
+                }
+            }
+            .listStyle(.plain)
+            .onChange(of: debugLogStore.entries.count) {
+                if autoScrollEnabled, let lastId = debugLogStore.entries.last?.id {
+                    withAnimation {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var debugStatusBar: some View {
+        HStack {
+            Text("Debug Logs")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+            Spacer()
+
+            Button(action: { debugLogStore.clear() }) {
+                Label("Clear Logs", systemImage: "trash")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.plain)
+
+            Text("\(debugLogStore.entries.count) entries")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func logLevelColor(_ level: DebugLogEntry.Level) -> Color {
+        switch level {
+        case .info: return .primary
+        case .warning: return .orange
+        case .error: return .red
         }
     }
 

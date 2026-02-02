@@ -2,8 +2,8 @@
 //  FloatingPanel.swift
 //  Livcap
 //
-//  Non-activating NSPanel for the overlay caption display.
-//  Clicking this panel does not activate the app or bring other windows forward.
+//  Borderless NSPanel for the overlay caption display.
+//  Visible in Mission Control and Alt-Tab window switchers.
 //
 
 import SwiftUI
@@ -17,14 +17,14 @@ final class FloatingPanel: NSPanel {
     init<Content: View>(contentView: Content) {
         super.init(
             contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel, .resizable],
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
 
         isFloatingPanel = true
         level = .normal
-        collectionBehavior = [.canJoinAllSpaces]
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isOpaque = false
         // Use nearly-transparent background so the entire window area captures mouse events
         // (fully clear background causes clicks in transparent areas to pass through)
@@ -38,6 +38,9 @@ final class FloatingPanel: NSPanel {
 
         let hostingView = NSHostingView(rootView: contentView)
         self.contentView = hostingView
+
+        // Persist window frame across launches
+        setFrameAutosaveName("LivcapOverlayPanel")
     }
 
     /// Ensure the panel becomes key on mouse interaction so resize drag works.
@@ -48,13 +51,14 @@ final class FloatingPanel: NSPanel {
         super.sendEvent(event)
     }
 
-    /// Position the panel at the bottom center of the focused screen.
-    func positionAtBottom() {
+    /// Position the panel at the lower-third center of the focused screen (subtitle-style).
+    func positionDefault() {
         let screen = getFocusedScreen()
-        let width = screen.frame.width * 0.618
+        let visibleFrame = screen.visibleFrame
+        let width = visibleFrame.width * 0.618
         let height: CGFloat = 80
-        let x = screen.frame.minX + (screen.frame.width - width) / 2
-        let y = calculateYPositionAboveDock(screen: screen, windowHeight: height)
+        let x = visibleFrame.minX + (visibleFrame.width - width) / 2
+        let y = visibleFrame.minY + visibleFrame.height * 0.25 - height / 2
         setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }
 
@@ -66,14 +70,5 @@ final class FloatingPanel: NSPanel {
             }
         }
         return NSScreen.main ?? NSScreen.screens.first!
-    }
-
-    private func calculateYPositionAboveDock(screen: NSScreen, windowHeight: CGFloat) -> CGFloat {
-        let visibleFrame = screen.visibleFrame
-        let dockHeight = screen.frame.height - visibleFrame.height
-        if dockHeight > 0 {
-            return visibleFrame.minY + 10
-        }
-        return screen.frame.minY + 20
     }
 }
