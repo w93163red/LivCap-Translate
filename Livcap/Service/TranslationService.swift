@@ -8,7 +8,7 @@ import os.log
 
 // MARK: - Translation Error Types
 
-enum TranslationError: Error, LocalizedError {
+enum OpenAITranslationError: Error, LocalizedError {
     case notEnabled
     case invalidConfiguration
     case networkError(Error)
@@ -86,7 +86,7 @@ final class TranslationService: ObservableObject {
     /// Test translation directly, returns the translated text or throws an error
     func testTranslation(_ text: String) async throws -> String {
         guard !settings.apiKey.isEmpty, !settings.apiEndpoint.isEmpty else {
-            throw TranslationError.invalidConfiguration
+            throw OpenAITranslationError.invalidConfiguration
         }
         return try await performTranslation(text)
     }
@@ -152,18 +152,18 @@ final class TranslationService: ObservableObject {
         let (data, response) = try await urlSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw TranslationError.networkError(NSError(domain: "TranslationService", code: -1))
+            throw OpenAITranslationError.networkError(NSError(domain: "TranslationService", code: -1))
         }
 
         guard httpResponse.statusCode == 200 else {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw TranslationError.apiError("Status \(httpResponse.statusCode): \(errorMessage)")
+            throw OpenAITranslationError.apiError("Status \(httpResponse.statusCode): \(errorMessage)")
         }
 
         let chatResponse = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
 
         guard let translatedText = chatResponse.choices.first?.message.content else {
-            throw TranslationError.decodingError
+            throw OpenAITranslationError.decodingError
         }
 
         return translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -182,7 +182,7 @@ final class TranslationService: ObservableObject {
         }
 
         guard let url = URL(string: endpoint) else {
-            throw TranslationError.invalidConfiguration
+            throw OpenAITranslationError.invalidConfiguration
         }
 
         return url

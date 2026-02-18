@@ -6,11 +6,13 @@
 //
 
 import SwiftUI
+import Translation
 
 struct MainWindowView: View {
     @EnvironmentObject var captionViewModel: CaptionViewModel
     @ObservedObject private var settings = TranslationSettings.shared
     @ObservedObject private var debugLogStore = DebugLogStore.shared
+    @ObservedObject private var appleTranslationService = AppleTranslationService.shared
     @State private var autoScrollEnabled = true
     @State private var isPinned = false
     @State private var showSettings = false
@@ -72,8 +74,29 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 500, minHeight: 300)
+        .translationTask(appleTranslationService.configuration) { session in
+            appleTranslationService.updateSession(session)
+        }
         .onAppear {
             persistedEntries = captionViewModel.captionStore.fetchAll()
+            if settings.translationProvider == .apple {
+                appleTranslationService.reconfigure()
+            }
+        }
+        .onChange(of: settings.appleSourceLanguageCode) {
+            if settings.translationProvider == .apple {
+                appleTranslationService.reconfigure()
+            }
+        }
+        .onChange(of: settings.appleTargetLanguageCode) {
+            if settings.translationProvider == .apple {
+                appleTranslationService.reconfigure()
+            }
+        }
+        .onChange(of: settings.providerRawValue) {
+            if settings.translationProvider == .apple {
+                appleTranslationService.reconfigure()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             guard let window = notification.object as? NSWindow,
@@ -366,31 +389,62 @@ struct MainWindowView: View {
                 Label("Translation", systemImage: "globe")
             }
 
-            // API Configuration
+            // Provider Selection
             Section {
-                TextField("API Endpoint", text: $settings.apiEndpoint)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!settings.isTranslationEnabled)
-
-                SecureField("API Key", text: $settings.apiKey)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!settings.isTranslationEnabled)
-
-                TextField("Model", text: $settings.model)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(!settings.isTranslationEnabled)
+                Picker("Provider", selection: $settings.providerRawValue) {
+                    ForEach(TranslationProvider.allCases, id: \.rawValue) { provider in
+                        Text(provider.displayName).tag(provider.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!settings.isTranslationEnabled)
             } header: {
-                Label("API", systemImage: "server.rack")
+                Label("Provider", systemImage: "arrow.triangle.swap")
+            }
+
+            // API Configuration (OpenAI only)
+            if settings.translationProvider == .openai {
+                Section {
+                    TextField("API Endpoint", text: $settings.apiEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!settings.isTranslationEnabled)
+
+                    SecureField("API Key", text: $settings.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!settings.isTranslationEnabled)
+
+                    TextField("Model", text: $settings.model)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!settings.isTranslationEnabled)
+                } header: {
+                    Label("API", systemImage: "server.rack")
+                }
             }
 
             // Language
             Section {
-                Picker("Target Language", selection: $settings.targetLanguage) {
-                    ForEach(TranslationSettings.availableLanguages, id: \.self) { language in
-                        Text(language).tag(language)
+                if settings.translationProvider == .apple {
+                    Picker("Source Language", selection: $settings.appleSourceLanguageCode) {
+                        ForEach(AppleLanguage.supported) { lang in
+                            Text(lang.displayName).tag(lang.id)
+                        }
                     }
+                    .disabled(!settings.isTranslationEnabled)
+
+                    Picker("Target Language", selection: $settings.appleTargetLanguageCode) {
+                        ForEach(AppleLanguage.supported) { lang in
+                            Text(lang.displayName).tag(lang.id)
+                        }
+                    }
+                    .disabled(!settings.isTranslationEnabled)
+                } else {
+                    Picker("Target Language", selection: $settings.targetLanguage) {
+                        ForEach(TranslationSettings.availableLanguages, id: \.self) { language in
+                            Text(language).tag(language)
+                        }
+                    }
+                    .disabled(!settings.isTranslationEnabled)
                 }
-                .disabled(!settings.isTranslationEnabled)
             } header: {
                 Label("Language", systemImage: "character.bubble")
             }
@@ -400,15 +454,23 @@ struct MainWindowView: View {
                 Stepper("Visible Sentences: \(settings.maxVisibleSentences)",
                         value: $settings.maxVisibleSentences, in: 1...10)
 
-                Stepper("Context Size: \(settings.maxContextSize)",
-                        value: $settings.maxContextSize, in: 1...30)
-                    .disabled(!settings.isTranslationEnabled)
+                if settings.translationProvider == .openai {
+                    Stepper("Context Size: \(settings.maxContextSize)",
+                            value: $settings.maxContextSize, in: 1...30)
+                        .disabled(!settings.isTranslationEnabled)
+                }
             } header: {
                 Label("Display & Context", systemImage: "text.alignleft")
             } footer: {
-                Text("Visible sentences shown on overlay. Context size sent to LLM.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if settings.translationProvider == .openai {
+                    Text("Visible sentences shown on overlay. Context size sent to LLM.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Number of recent sentences shown on the overlay.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             // Overlay Font Size

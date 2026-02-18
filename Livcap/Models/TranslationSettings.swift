@@ -6,6 +6,53 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Translation Provider
+
+enum TranslationProvider: String, CaseIterable {
+    case apple = "apple"
+    case openai = "openai"
+
+    var displayName: String {
+        switch self {
+        case .apple: return "Apple Translation"
+        case .openai: return "OpenAI API"
+        }
+    }
+}
+
+// MARK: - Apple Translation Languages
+
+struct AppleLanguage: Identifiable, Hashable {
+    let id: String // Locale identifier (e.g. "en", "zh-Hans")
+    let displayName: String
+
+    var localeLanguage: Locale.Language {
+        Locale.Language(identifier: id)
+    }
+
+    static let supported: [AppleLanguage] = [
+        AppleLanguage(id: "ar", displayName: "Arabic"),
+        AppleLanguage(id: "de", displayName: "German"),
+        AppleLanguage(id: "en", displayName: "English"),
+        AppleLanguage(id: "es", displayName: "Spanish"),
+        AppleLanguage(id: "fr", displayName: "French"),
+        AppleLanguage(id: "hi", displayName: "Hindi"),
+        AppleLanguage(id: "id", displayName: "Indonesian"),
+        AppleLanguage(id: "it", displayName: "Italian"),
+        AppleLanguage(id: "ja", displayName: "Japanese"),
+        AppleLanguage(id: "ko", displayName: "Korean"),
+        AppleLanguage(id: "pl", displayName: "Polish"),
+        AppleLanguage(id: "pt-BR", displayName: "Portuguese (Brazil)"),
+        AppleLanguage(id: "ru", displayName: "Russian"),
+        AppleLanguage(id: "th", displayName: "Thai"),
+        AppleLanguage(id: "tr", displayName: "Turkish"),
+        AppleLanguage(id: "uk", displayName: "Ukrainian"),
+        AppleLanguage(id: "vi", displayName: "Vietnamese"),
+        AppleLanguage(id: "zh-Hans", displayName: "Chinese (Simplified)"),
+        AppleLanguage(id: "zh-Hant", displayName: "Chinese (Traditional)"),
+    ]
+}
+
 final class TranslationSettings: ObservableObject {
 
     // MARK: - Singleton
@@ -14,6 +61,7 @@ final class TranslationSettings: ObservableObject {
     // MARK: - AppStorage Keys
     private enum Keys {
         static let isEnabled = "translation_enabled"
+        static let provider = "translation_provider"
         static let apiEndpoint = "translation_api_endpoint"
         static let apiKey = "translation_api_key"
         static let targetLanguage = "translation_target_language"
@@ -26,6 +74,8 @@ final class TranslationSettings: ObservableObject {
         static let historyTranslationFontSize = "history_translation_font_size"
         static let overlayOriginalFontSize = "overlay_original_font_size"
         static let overlayTranslationFontSize = "overlay_translation_font_size"
+        static let appleSourceLanguage = "translation_apple_source_language"
+        static let appleTargetLanguage = "translation_apple_target_language"
     }
 
     // MARK: - Published Properties with AppStorage
@@ -34,6 +84,26 @@ final class TranslationSettings: ObservableObject {
     @AppStorage(Keys.apiKey) var apiKey: String = ""
     @AppStorage(Keys.targetLanguage) var targetLanguage: String = "Chinese"
     @AppStorage(Keys.model) var model: String = "gpt-4o-mini"
+
+    // MARK: - Provider Selection
+    @AppStorage(Keys.provider) var providerRawValue: String = TranslationProvider.apple.rawValue
+
+    var translationProvider: TranslationProvider {
+        get { TranslationProvider(rawValue: providerRawValue) ?? .apple }
+        set { providerRawValue = newValue.rawValue }
+    }
+
+    // MARK: - Apple Translation Settings
+    @AppStorage(Keys.appleSourceLanguage) var appleSourceLanguageCode: String = "en"
+    @AppStorage(Keys.appleTargetLanguage) var appleTargetLanguageCode: String = "zh-Hans"
+
+    var appleSourceLanguage: Locale.Language {
+        Locale.Language(identifier: appleSourceLanguageCode)
+    }
+
+    var appleTargetLanguage: Locale.Language {
+        Locale.Language(identifier: appleTargetLanguageCode)
+    }
 
     // MARK: - Translation Timing Settings (based on LiveCaptions-Translator)
     // MaxIdleInterval: frames of no caption change before triggering translation (default 50 * 25ms = 1.25s)
@@ -78,6 +148,11 @@ final class TranslationSettings: ObservableObject {
 
     // MARK: - Validation
     var isConfigured: Bool {
-        return !apiKey.isEmpty && !apiEndpoint.isEmpty
+        switch translationProvider {
+        case .apple:
+            return true // No API key needed
+        case .openai:
+            return !apiKey.isEmpty && !apiEndpoint.isEmpty
+        }
     }
 }

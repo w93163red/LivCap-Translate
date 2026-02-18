@@ -35,7 +35,7 @@ final class TranslationController {
 
     // MARK: - Properties
 
-    private let translationService = TranslationService.shared
+    private let openAIService = TranslationService.shared
     private let settings = TranslationSettings.shared
     private let logger = Logger(subsystem: "com.livcap.translation", category: "TranslationController")
 
@@ -123,6 +123,16 @@ final class TranslationController {
 
     // MARK: - Private Methods
 
+    /// Route translation to the active provider
+    private func translate(_ text: String, context: String) async -> String? {
+        switch settings.translationProvider {
+        case .apple:
+            return await AppleTranslationService.shared.translate(text)
+        case .openai:
+            return await openAIService.translateText(text, context: context)
+        }
+    }
+
     /// Build context string in mac-transcriber format: "原文 -> 翻译"
     private func buildContextString() -> String {
         let contextLines = translationContexts.compactMap { ctx -> String? in
@@ -180,7 +190,7 @@ final class TranslationController {
         let task = Task { [weak self] in
             guard let self = self else { return }
 
-            if let translatedText = await self.translationService.translateText(text, context: contextString) {
+            if let translatedText = await self.translate(text, context: contextString) {
                 await MainActor.run {
                     self.onRealtimeTranslationComplete?(translatedText)
                 }
@@ -202,7 +212,7 @@ final class TranslationController {
         let task = Task { [weak self] in
             guard let self = self else { return }
 
-            if let translatedText = await self.translationService.translateText(text, context: context) {
+            if let translatedText = await self.translate(text, context: context) {
                 self.cancelOlderTasks(for: captionId)
 
                 // Update translation in context
