@@ -1,0 +1,4 @@
+fastapi>=0.129.0
+uvicorn[standard]>=0.41.0
+gemini_webapi>=1.19.2
+browser-cookie3>=0.20.1

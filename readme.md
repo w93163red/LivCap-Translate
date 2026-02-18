@@ -91,7 +91,47 @@ Livcap/
 ├── Models/                 # CaptionEntry, TranslationSettings
 ├── CoreAudioTapEngine/     # System audio capture engine
 └── LivcapApp.swift         # Entry point
+Server/                         # Gemini-to-OpenAI proxy server (Python)
+├── gemini_proxy/               # FastAPI app package
+├── requirements.txt
+└── run.sh
 ```
+
+
+## Gemini Proxy Server (Optional)
+
+A built-in lightweight proxy that translates OpenAI API requests to Google Gemini via [gemini-webapi](https://github.com/HanaokaYuworker/Gemini-API). This lets you use Gemini for translation for free — no API key needed, authentication is handled via browser cookies.
+
+### Setup
+
+```bash
+cd Server
+uv venv
+uv pip install -r requirements.txt
+```
+
+### Run
+
+```bash
+cd Server
+uv run python -m gemini_proxy.server
+
+# or simply
+./run.sh
+```
+
+The server starts at `http://127.0.0.1:11435`.
+
+### Livcap Settings
+
+| Setting | Value |
+|---------|-------|
+| Provider | **OpenAI API** |
+| Endpoint | `http://localhost:11435/v1` |
+| API Key | any non-empty string (e.g. `dummy`) |
+| Model | `gemini-3.0-flash` |
+
+Available models: `gemini-3.0-flash`, `gemini-3.0-pro`, `gemini-3.0-flash-thinking`. OpenAI names (`gpt-4o`, `gpt-4o-mini`) are aliased to `gemini-3.0-flash`.
 
 
 ## Requirements

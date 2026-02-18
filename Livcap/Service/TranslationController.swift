@@ -44,6 +44,8 @@ final class TranslationController {
     private var updateCount: Int = 0
     private var lastUpdateTime: Date = Date()
     private var realtimeTranslationPending: Bool = false
+    /// Timestamp of the last translation API call (for global throttling)
+    private var lastTranslationTime: Date = .distantPast
 
     // Context: recent sentences with their translations (original -> translation pairs)
     private var translationContexts: [TranslationContext] = []
@@ -89,7 +91,8 @@ final class TranslationController {
 
             if currentText.count >= realtimeTextMinLength &&
                updateCount >= realtimeUpdateThreshold &&
-               !realtimeTranslationPending {
+               !realtimeTranslationPending &&
+               canThrottledTranslate() {
                 logger.info("🔄 Realtime translation triggered (update count: \(self.updateCount))")
                 triggerRealtimeTranslation(text: currentText)
             }
@@ -125,6 +128,7 @@ final class TranslationController {
 
     /// Route translation to the active provider
     private func translate(_ text: String, context: String) async -> String? {
+        lastTranslationTime = Date()
         switch settings.translationProvider {
         case .apple:
             return await AppleTranslationService.shared.translate(text)
@@ -168,10 +172,20 @@ final class TranslationController {
 
         let idleTime = Date().timeIntervalSince(lastUpdateTime)
 
-        if idleTime >= realtimeIdleThreshold && lastText.count >= realtimeTextMinLength {
+        if idleTime >= realtimeIdleThreshold && lastText.count >= realtimeTextMinLength && canThrottledTranslate() {
             logger.info("🔄 Realtime translation triggered (idle: \(String(format: "%.2f", idleTime))s)")
             triggerRealtimeTranslation(text: lastText)
         }
+    }
+
+    /// Check if enough time has passed since the last translation request.
+    /// Only applies to OpenAI provider with non-zero throttle interval.
+    private func canThrottledTranslate() -> Bool {
+        guard settings.translationProvider == .openai,
+              settings.minTranslationInterval > 0 else {
+            return true
+        }
+        return Date().timeIntervalSince(lastTranslationTime) >= settings.minTranslationInterval
     }
 
     private func resetRealtimeState() {

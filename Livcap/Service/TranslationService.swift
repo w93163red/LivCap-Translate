@@ -69,7 +69,7 @@ final class TranslationService: ObservableObject {
     // MARK: - Private Properties
     private let logger = Logger(subsystem: "com.livcap.translation", category: "TranslationService")
     private let urlSession: URLSession
-    private let timeout: TimeInterval = 8.0
+    private let timeout: TimeInterval = 30.0
 
     // MARK: - Initialization
 

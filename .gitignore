@@ -14,3 +14,8 @@ dev.md
 scripts/codesign/*.crt
 scripts/codesign/*.key
 scripts/codesign/*.p12
+
+# Python proxy server
+Server/__pycache__/
+Server/gemini_proxy/__pycache__/
+Server/.venv/

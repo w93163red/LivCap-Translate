@@ -76,6 +76,7 @@ final class TranslationSettings: ObservableObject {
         static let overlayTranslationFontSize = "overlay_translation_font_size"
         static let appleSourceLanguage = "translation_apple_source_language"
         static let appleTargetLanguage = "translation_apple_target_language"
+        static let minTranslationInterval = "translation_min_interval"
     }
 
     // MARK: - Published Properties with AppStorage
@@ -110,6 +111,9 @@ final class TranslationSettings: ObservableObject {
     @AppStorage(Keys.maxIdleInterval) var maxIdleInterval: Int = 50
     // MaxSyncInterval: caption changes before triggering translation even without sentence end (default 3)
     @AppStorage(Keys.maxSyncInterval) var maxSyncInterval: Int = 3
+
+    // Minimum seconds between translation API calls (throttling for rate-limited backends like Gemini proxy)
+    @AppStorage(Keys.minTranslationInterval) var minTranslationInterval: Double = 3.0
 
     // MARK: - Display Settings
     // Maximum number of sentences visible in caption display (paragraph mode)

@@ -473,6 +473,26 @@ struct MainWindowView: View {
                 }
             }
 
+            // Throttling (OpenAI only)
+            if settings.translationProvider == .openai {
+                Section {
+                    HStack {
+                        Text("Min Request Interval")
+                        Spacer()
+                        Text("\(settings.minTranslationInterval, specifier: "%.1f")s")
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: $settings.minTranslationInterval, in: 0...10, step: 0.5)
+                        .disabled(!settings.isTranslationEnabled)
+                } header: {
+                    Label("Throttling", systemImage: "gauge.with.dots.needle.33percent")
+                } footer: {
+                    Text("Minimum seconds between translation API calls. Increase for rate-limited backends (e.g. Gemini proxy).")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             // Overlay Font Size
             Section {
                 Stepper("Original: \(Int(settings.overlayOriginalFontSize))pt",
