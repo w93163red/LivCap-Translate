@@ -12,6 +12,7 @@ struct MainWindowView: View {
     @ObservedObject private var settings = TranslationSettings.shared
     @ObservedObject private var debugLogStore = DebugLogStore.shared
     @State private var autoScrollEnabled = true
+    @State private var isPinned = false
     @State private var showSettings = false
     @State private var showDebugLogs = false
     @State private var searchText = ""
@@ -86,6 +87,18 @@ struct MainWindowView: View {
     private var toolbar: some View {
         VStack(spacing: 6) {
             HStack {
+                Button(action: { captionViewModel.toggleMicrophone() }) {
+                    Label("Microphone", systemImage: captionViewModel.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill")
+                }
+                .help(captionViewModel.isMicrophoneEnabled ? "Disable Microphone" : "Enable Microphone")
+
+                Button(action: { captionViewModel.toggleSystemAudio() }) {
+                    Label("System Audio", systemImage: captionViewModel.isSystemAudioEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                }
+                .help(captionViewModel.isSystemAudioEnabled ? "Disable System Audio" : "Enable System Audio")
+
+                Divider().frame(height: 16)
+
                 Button(action: {
                     captionViewModel.clearCaptions()
                     persistedEntries = []
@@ -109,6 +122,14 @@ struct MainWindowView: View {
                     }
                     .help("Toggle Debug Logs")
                 }
+
+                Button(action: {
+                    isPinned.toggle()
+                    toggleMainWindowPinning()
+                }) {
+                    Label("Pin", systemImage: isPinned ? "pin.fill" : "pin")
+                }
+                .help(isPinned ? "Unpin Window" : "Pin Window on Top")
 
                 Button(action: { withAnimation { showSettings.toggle() } }) {
                     Label("Settings", systemImage: "gearshape")
@@ -215,6 +236,19 @@ struct MainWindowView: View {
                 if autoScrollEnabled && !isSearching && !captionViewModel.currentTranscription.isEmpty {
                     withAnimation {
                         proxy.scrollTo("current-transcription", anchor: .bottom)
+                    }
+                }
+            }
+            .onChange(of: historyEntries.last?.translation) {
+                if autoScrollEnabled && !isSearching {
+                    if !captionViewModel.currentTranscription.isEmpty {
+                        withAnimation {
+                            proxy.scrollTo("current-transcription", anchor: .bottom)
+                        }
+                    } else if let lastId = historyEntries.last?.id {
+                        withAnimation {
+                            proxy.scrollTo(lastId, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -421,6 +455,19 @@ struct MainWindowView: View {
                 guard !Task.isCancelled else { return }
                 searchResults = results
             }
+        }
+    }
+
+    // MARK: - Pin Main Window
+
+    private func toggleMainWindowPinning() {
+        guard let window = NSApp.windows.first(where: { $0.title == "Livcap - History" }) else { return }
+        if isPinned {
+            window.level = .floating
+            window.collectionBehavior = [.fullScreenAuxiliary]
+        } else {
+            window.level = .normal
+            window.collectionBehavior = []
         }
     }
 

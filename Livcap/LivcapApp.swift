@@ -73,7 +73,7 @@ struct LivcapApp: App {
         if panel.frame.width < 1 {
             panel.positionDefault()
         }
-        panel.orderFront(nil)
+        // Panel is created but hidden; user can show it via "Toggle Overlay" button
         appDelegate.overlayPanel = panel
     }
 }
