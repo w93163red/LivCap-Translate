@@ -77,15 +77,26 @@ final class SpeechRecognitionManager: ObservableObject {
 
     // Session ID to discard stale callbacks from cancelled sessions
     private var currentSessionId: UUID = UUID()
-    
+
+    // Session health watchdog
+    private var watchdogTask: Task<Void, Never>?
+    private var lastResultTime: Date?
+    private let watchdogInterval: TimeInterval = 10.0  // check every 10s
+    private let sessionStaleThreshold: TimeInterval = 65.0  // SFSpeechRecognizer ~60s limit + 5s buffer
+
+    // Retry configuration for session start
+    private static let maxRetryAttempts = 6
+    private static let retryDelays: [TimeInterval] = [0.05, 0.1, 0.3, 0.5, 1.0, 2.0]
+
     // MARK: - Initialization
-    
+
     init() {
         self.speechRecognizer = SFSpeechRecognizer(locale: Locale.current)
         setupSpeechRecognition()
     }
     
     deinit {
+        watchdogTask?.cancel()
         stopRecording()
         speechEventsContinuation?.finish()
     }
@@ -163,37 +174,43 @@ final class SpeechRecognitionManager: ObservableObject {
         await MainActor.run {
             self.startNewSession()
         }
-        
+
         await MainActor.run {
             self.isRecording = true
             self.currentTranscription = ""
         }
-        
+
         // Reset state
         processedSegmentCount = 0
         currentSpeechState = false
         consecutiveSilenceFrames = 0
 
-        // Session rotation is handled by result.isFinal callback
-        
+        // Start watchdog to detect stale sessions
+        startWatchdog()
+
         logger.info("✅ SPEECH RECOGNITION ENGINE STARTED")
         DebugLogStore.shared.send("SPEECH RECOGNITION ENGINE STARTED")
     }
     
     func stopRecording() {
         logger.info("⏹️ STOPPING SPEECH RECOGNITION ENGINE")
-        
+
         guard isRecording else { return }
-        
+
+        // Stop watchdog
+        watchdogTask?.cancel()
+        watchdogTask = nil
+
         // Cancel recognition task
         recognitionTask?.cancel()
         recognitionTask = nil
-        
+
         // End recognition request
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        
+
         sessionStartTime = nil
+        lastResultTime = nil
         Task { @MainActor in
             self.isRecording = false
 
@@ -204,7 +221,7 @@ final class SpeechRecognitionManager: ObservableObject {
                 self.currentTranscription = ""
             }
         }
-        
+
         // Reset state
         processedSegmentCount = 0
         consecutiveSilenceFrames = 0
@@ -307,15 +324,33 @@ final class SpeechRecognitionManager: ObservableObject {
         finalizeStableSentences(formattedString: formattedString, segments: segments)
     }
     
-    // MARK: - Session Management (Concise)
-    
+    // MARK: - Session Management
+
     @MainActor
     private func startNewSession() {
+        startNewSessionWithRetry(attempt: 0)
+    }
+
+    @MainActor
+    private func startNewSessionWithRetry(attempt: Int) {
+        guard isRecording else { return }
+
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
-            logger.error("❌ Cannot start session: recognizer unavailable")
-            DebugLogStore.shared.log("Cannot start session: recognizer unavailable", level: .error)
+            if attempt < Self.maxRetryAttempts {
+                let delay = Self.retryDelays[attempt]
+                logger.warning("⏳ Recognizer unavailable, retrying in \(String(format: "%.2f", delay))s (attempt \(attempt + 1)/\(Self.maxRetryAttempts))")
+                DebugLogStore.shared.log("Recognizer unavailable, retry \(attempt + 1) in \(delay)s", level: .warning)
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    self?.startNewSessionWithRetry(attempt: attempt + 1)
+                }
+            } else {
+                logger.error("❌ Cannot start session after \(Self.maxRetryAttempts) attempts: recognizer unavailable")
+                DebugLogStore.shared.log("Cannot start session after \(Self.maxRetryAttempts) retries", level: .error)
+            }
             return
         }
+
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
@@ -353,6 +388,7 @@ final class SpeechRecognitionManager: ObservableObject {
                     return
                 }
                 if let result = result {
+                    self.lastResultTime = Date()
                     self.processTranscriptionResult(result)
 
                     if result.isFinal {
@@ -364,6 +400,7 @@ final class SpeechRecognitionManager: ObservableObject {
             }
         }
         sessionStartTime = Date()
+        lastResultTime = Date()
         sessionActive = true
         logger.info("♻️ Session started")
         DebugLogStore.shared.log("Session started")
@@ -378,7 +415,7 @@ final class SpeechRecognitionManager: ObservableObject {
         sessionStartTime = nil
         sessionActive = false
     }
-    
+
     private func rotateSession(reason: String, finalizeCurrent: Bool) {
         Task { @MainActor in
             guard self.isRecording else { return }
@@ -392,6 +429,44 @@ final class SpeechRecognitionManager: ObservableObject {
             self.processedSegmentCount = 0
             self.currentTranscription = ""
             self.startNewSession()
+        }
+    }
+
+    // MARK: - Session Health Watchdog
+
+    private func startWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(10 * 1_000_000_000)) // 10s
+                guard !Task.isCancelled else { break }
+                await self?.checkSessionHealth()
+            }
+        }
+    }
+
+    @MainActor
+    private func checkSessionHealth() {
+        guard isRecording else { return }
+
+        // Check 1: recognitionRequest is nil but we should be recording → session lost
+        if recognitionRequest == nil && !sessionActive {
+            logger.warning("🏥 Watchdog: no active session detected, restarting")
+            DebugLogStore.shared.log("Watchdog: restarting lost session", level: .warning)
+            startNewSession()
+            return
+        }
+
+        // Check 2: session has been running too long without any result callback
+        // (SFSpeechRecognizer sometimes silently stops sending callbacks)
+        if let lastResult = lastResultTime, let sessionStart = sessionStartTime {
+            let timeSinceLastResult = Date().timeIntervalSince(lastResult)
+            let sessionAge = Date().timeIntervalSince(sessionStart)
+            if timeSinceLastResult > sessionStaleThreshold && sessionAge > sessionStaleThreshold {
+                logger.warning("🏥 Watchdog: session stale (\(String(format: "%.0f", timeSinceLastResult))s since last result), rotating")
+                DebugLogStore.shared.log("Watchdog: rotating stale session", level: .warning)
+                rotateSession(reason: "watchdog-stale", finalizeCurrent: true)
+            }
         }
     }
     
